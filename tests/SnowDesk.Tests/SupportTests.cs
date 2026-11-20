@@ -61,11 +61,38 @@ public class SettingsTests
         Assert.Equal(1, loaded.PlowIntervalMinutes);
         Assert.True(loaded.StartWithWindows);
         Assert.False(loaded.PauseOnBatterySaver);
+        Assert.True(loaded.Repeat);
+        Assert.Equal(100, loaded.TruckScalePercent);
 
         File.WriteAllText(path, "{ this is not json");
         AppSettings fallback = store.Load();
         Assert.Equal(40, fallback.Intensity);
         Assert.True(fallback.TaskbarSnow);
+        Assert.True(fallback.Repeat);
+        Assert.Equal(100, fallback.TruckScalePercent);
+    }
+
+    [Fact]
+    public void Repeat_and_truck_size_roundtrip_and_clamp()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "snowdesk-tests", Guid.NewGuid().ToString("n"), "settings.json");
+        var store = new SettingsStore(path);
+        store.Save(new AppSettings { Repeat = false, TruckScalePercent = 900, MusicPath = "C:\\song.mp3" });
+        AppSettings loaded = store.Load();
+        Assert.False(loaded.Repeat);
+        Assert.Equal(200, loaded.TruckScalePercent);
+        Assert.Contains("\"repeat\": false", File.ReadAllText(path), StringComparison.Ordinal);
+        Assert.Contains("\"truckScalePercent\": 200", File.ReadAllText(path), StringComparison.Ordinal);
+
+        store.Save(new AppSettings { Repeat = true, TruckScalePercent = 12 });
+        AppSettings small = store.Load();
+        Assert.True(small.Repeat);
+        Assert.Equal(50, small.TruckScalePercent);
+
+        File.WriteAllText(path, """{"intensity":40}""");
+        AppSettings missing = store.Load();
+        Assert.True(missing.Repeat);
+        Assert.Equal(100, missing.TruckScalePercent);
     }
 }
 
@@ -193,6 +220,67 @@ public class RasterizerTests
 
         Assert.True(orange > 200, $"orange pixels {orange}");
         Assert.True(pale > 20, $"blade pixels {pale}");
+        Assert.Equal(264, KamazSprite.Width);
+        Assert.Equal(144, KamazSprite.Height);
+    }
+
+    [Fact]
+    public void Truck_size_is_one_and_a_half_times_v12_and_the_slider_scales_every_part()
+    {
+        KamazSprite.Frame full = KamazSprite.Measure(100);
+        Assert.Equal(264, full.Width);
+        Assert.Equal(144, full.Height);
+        Assert.Equal(176 * 3 / 2, full.Width);
+        Assert.Equal(96 * 3 / 2, full.Height);
+
+        KamazSprite.Frame half = KamazSprite.Measure(50);
+        KamazSprite.Frame huge = KamazSprite.Measure(200);
+        Assert.Equal(full.Width / 2, half.Width);
+        Assert.Equal(full.Height / 2, half.Height);
+        Assert.Equal(full.BladeX / 2, half.BladeX);
+        Assert.Equal(full.BladeY / 2, half.BladeY);
+        Assert.Equal(full.WheelX / 2, half.WheelX);
+        Assert.Equal(full.WheelY / 2, half.WheelY);
+        Assert.Equal(full.BeaconX / 2, half.BeaconX);
+        Assert.Equal(full.BeaconY / 2, half.BeaconY);
+        Assert.Equal(full.Width * 2, huge.Width);
+        Assert.Equal(full.Height * 2, huge.Height);
+        Assert.Equal(full.BladeX * 2, huge.BladeX);
+        Assert.Equal(full.WheelY * 2, huge.WheelY);
+        Assert.Equal(full.BeaconX * 2, huge.BeaconX);
+        Assert.Equal(50, KamazSprite.ClampPercent(1));
+        Assert.Equal(200, KamazSprite.ClampPercent(400));
+        Assert.Equal(-54f, full.StartTravel, 3);
+        Assert.Equal(-108f, huge.StartTravel, 3);
+        Assert.Equal(84f, full.EndMargin, 3);
+        Assert.True(huge.GlowNear > full.GlowNear);
+    }
+
+    [Fact]
+    public void Bubble_stays_on_screen_above_a_large_truck()
+    {
+        var sim = new SnowSimulation(seed: 3) { Intensity = 40, PlowIntervalMinutes = 120, TruckScalePercent = 200 };
+        var scene = new Scene
+        {
+            Width = 1280,
+            Height = 720,
+            Taskbars =
+            [
+                new TaskbarBand { Id = "bar", Edge = TaskbarEdge.Bottom, X = 0, Y = 680, Width = 1280, Height = 40 },
+            ],
+        };
+        sim.Update(1f / 30f, scene);
+        sim.CallPlow();
+        for (int i = 0; i < 180; i++)
+            sim.Update(1f / 30f, scene);
+        Assert.True(SnowRasterizer.TryTruckAnchor(sim.Bands[0], 200, out int anchorX, out int anchorY, out bool above));
+        Assert.True(above);
+        Assert.True(anchorY < 520, $"beacon stayed too low for a 200% truck: {anchorY}");
+        SpeechBubble.Placement place = SpeechBubble.Place(
+            anchorX, anchorY, scene.Width, scene.Height, 420, 64, above, sim.Bands[0].Travel, 1280);
+        Assert.InRange(place.X, 4, scene.Width - 4);
+        Assert.InRange(place.Y, 4, scene.Height - 4);
+        Assert.True(place.Y + 64 <= scene.Height - 4);
     }
 
     static int Count(FrameBuffer buffer)

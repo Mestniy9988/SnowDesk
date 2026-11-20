@@ -6,30 +6,75 @@ namespace SnowDesk;
 /// </summary>
 public static class KamazSprite
 {
-    public const int Width = 176;
-    public const int Height = 96;
-    public const int BladeX = 172;
-    public const int BladeY = 60;
-    public const int WheelX = 116;
-    public const int WheelY = 88;
-    public const int BeaconX = 104;
-    public const int BeaconY = 14;
+    public const int SourceWidth = 88;
+    public const int SourceHeight = 48;
+    /// <summary>100% is 1.5× the previous 176×96 truck, so every source pixel is 3×3.</summary>
+    public const int Nominal = 3;
+    public const int MinPercent = 50;
+    public const int MaxPercent = 200;
+    public const int Width = SourceWidth * Nominal;
+    public const int Height = SourceHeight * Nominal;
+    public const int BladeX = 86 * Nominal;
+    public const int BladeY = 30 * Nominal;
+    public const int WheelX = 58 * Nominal;
+    public const int WheelY = 44 * Nominal;
+    public const int BeaconX = 52 * Nominal;
+    public const int BeaconY = 7 * Nominal;
 
-    public static byte[] Pixels { get; } = Scale2(DrawSmall(), 88, 48);
+    public readonly record struct Frame(
+        int Width,
+        int Height,
+        int BladeX,
+        int BladeY,
+        int WheelX,
+        int WheelY,
+        int BeaconX,
+        int BeaconY,
+        int GlowNear,
+        int GlowFar,
+        float StartTravel,
+        float EndMargin,
+        int BladeClear);
 
-    static byte[] Scale2(byte[] source, int width, int height)
+    public static byte[] Pixels { get; } = Scale(DrawSmall(), SourceWidth, SourceHeight, Nominal);
+
+    public static int ClampPercent(int percent) => Math.Clamp(percent, MinPercent, MaxPercent);
+
+    public static Frame Measure(int percent)
     {
-        var scaled = new byte[width * 2 * height * 2 * 4];
+        int p = ClampPercent(percent);
+        int Part(int source) => source * Nominal * p / 100;
+        int width = Part(SourceWidth);
+        return new Frame(
+            width,
+            Part(SourceHeight),
+            Part(86),
+            Part(30),
+            Part(58),
+            Part(44),
+            Part(52),
+            Part(7),
+            Math.Max(2, 15 * p / 100),
+            Math.Max(1, 6 * p / 100),
+            -36f * width / 176f,
+            56f * width / 176f,
+            Math.Max(1, 20 * width / 176));
+    }
+
+    static byte[] Scale(byte[] source, int width, int height, int factor)
+    {
+        int scaledWidth = width * factor;
+        var scaled = new byte[scaledWidth * height * factor * 4];
         for (int y = 0; y < height; y++)
         {
             for (int x = 0; x < width; x++)
             {
                 int from = (y * width + x) * 4;
-                for (int dy = 0; dy < 2; dy++)
+                for (int dy = 0; dy < factor; dy++)
                 {
-                    for (int dx = 0; dx < 2; dx++)
+                    for (int dx = 0; dx < factor; dx++)
                     {
-                        int to = ((y * 2 + dy) * width * 2 + (x * 2 + dx)) * 4;
+                        int to = ((y * factor + dy) * scaledWidth + (x * factor + dx)) * 4;
                         scaled[to] = source[from];
                         scaled[to + 1] = source[from + 1];
                         scaled[to + 2] = source[from + 2];

@@ -140,6 +140,7 @@ public sealed class SnowSimulation
     }
 
     public int Intensity { get; set; } = 40;
+    public int TruckScalePercent { get; set; } = 100;
     public bool TaskbarSnow { get; set; } = true;
     public int PlowIntervalMinutes { get; set; } = 12;
     public float Time { get; private set; }
@@ -403,11 +404,12 @@ public sealed class SnowSimulation
 
             if (band.Plowing)
             {
+                KamazSprite.Frame truck = KamazSprite.Measure(TruckScalePercent);
                 float speed = MathF.Max(40f, band.Geometry.Length / 14.4f);
                 float previous = band.Travel;
                 band.Travel += speed * dt;
                 Sweep(band, previous, band.Travel);
-                if (band.Travel > band.Geometry.Length + 56f)
+                if (band.Travel > band.Geometry.Length + truck.EndMargin)
                 {
                     band.Plowing = false;
                     band.ElapsedSincePlow = 0f;
@@ -433,7 +435,7 @@ public sealed class SnowSimulation
         if (band.Plowing)
             return;
         band.Plowing = true;
-        band.Travel = -36f;
+        band.Travel = KamazSprite.Measure(TruckScalePercent).StartTravel;
         band.Puffs.Clear();
         PlowsStarted++;
     }
@@ -441,7 +443,8 @@ public sealed class SnowSimulation
     void Sweep(DriftBand band, float from, float to)
     {
         float[] heights = band.Heights;
-        int start = Math.Clamp((int)MathF.Floor(from) - BladeClearExtra, 0, heights.Length);
+        int extra = KamazSprite.Measure(TruckScalePercent).BladeClear;
+        int start = Math.Clamp((int)MathF.Floor(from) - extra, 0, heights.Length);
         int end = Math.Clamp((int)MathF.Ceiling(to), 0, heights.Length);
         for (int i = start; i < end; i++)
         {
@@ -493,15 +496,16 @@ public sealed class SnowSimulation
         }
 
         float life = 0.35f + _random.NextSingle() * 0.45f;
+        float scale = KamazSprite.Measure(TruckScalePercent).Width / 176f;
         band.Puffs.Add(new SnowPuff
         {
             X = x,
             Y = y,
-            Vx = vx,
-            Vy = vy,
+            Vx = vx * scale,
+            Vy = vy * scale,
             Life = life,
             MaxLife = life,
-            Size = 4f + _random.NextSingle() * 6f,
+            Size = (4f + _random.NextSingle() * 6f) * scale,
         });
     }
 

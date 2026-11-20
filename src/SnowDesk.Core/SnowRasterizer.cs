@@ -71,7 +71,7 @@ public static class SnowRasterizer
             DrawDrift(surface, band, fade);
             DrawPuffs(surface, band, fade);
             if (band.Plowing)
-                DrawTruck(surface, band, fade);
+                DrawTruck(surface, band, fade, simulation.TruckScalePercent);
         }
     }
 
@@ -206,56 +206,25 @@ public static class SnowRasterizer
         return (int)(230f * edge * fade / 255f);
     }
 
-    static void DrawTruck(Surface surface, DriftBand band, int fade)
+    static void DrawTruck(Surface surface, DriftBand band, int fade, int scalePercent)
     {
         TaskbarBand g = band.Geometry;
-        SpriteTransform transform = g.Edge switch
-        {
-            TaskbarEdge.Top => SpriteTransform.FlipVertical,
-            TaskbarEdge.Left => SpriteTransform.RotateClockwise,
-            TaskbarEdge.Right => SpriteTransform.RotateCounterClockwise,
-            _ => SpriteTransform.None,
-        };
+        KamazSprite.Frame frame = KamazSprite.Measure(scalePercent);
+        SpriteTransform transform = TransformFor(g.Edge);
+        (int drawX, int drawY) = PlaceTruck(g, band.Travel, frame, transform);
+        BlitSprite(surface, frame, drawX, drawY, fade, transform);
 
-        (int bladeX, int bladeY) = Map(KamazSprite.BladeX, KamazSprite.BladeY, transform);
-        (int wheelX, int wheelY) = Map(KamazSprite.WheelX, KamazSprite.WheelY, transform);
-        (int beaconX, int beaconY) = Map(KamazSprite.BeaconX, KamazSprite.BeaconY, transform);
-
-        int travel = (int)band.Travel;
-        int drawX;
-        int drawY;
-        switch (g.Edge)
-        {
-            case TaskbarEdge.Bottom:
-                drawX = g.X + travel - bladeX;
-                drawY = (g.Y - 1) - wheelY;
-                break;
-            case TaskbarEdge.Top:
-                drawX = g.X + travel - bladeX;
-                drawY = (g.Y + g.Height) - wheelY;
-                break;
-            case TaskbarEdge.Left:
-                drawX = (g.X + g.Width) - wheelX;
-                drawY = g.Y + travel - bladeY;
-                break;
-            default:
-                drawX = (g.X - 1) - wheelX;
-                drawY = g.Y + travel - bladeY;
-                break;
-        }
-
-        BlitSprite(surface, KamazSprite.Pixels, KamazSprite.Width, KamazSprite.Height, drawX, drawY, fade, transform);
-
+        (int beaconX, int beaconY) = Map(frame.BeaconX, frame.BeaconY, transform, frame);
         bool lampOn = (band.Blink % 0.62f) < 0.16f;
         int lampX = drawX + beaconX;
         int lampY = drawY + beaconY;
         if (lampOn)
-            DrawGlow(surface, lampX, lampY, 10, fade, 60, 210, 255);
+            DrawGlow(surface, lampX, lampY, frame.GlowNear, fade, 60, 210, 255);
         else
-            DrawGlow(surface, lampX, lampY, 4, fade / 2, 40, 120, 160);
+            DrawGlow(surface, lampX, lampY, frame.GlowFar, fade / 2, 40, 120, 160);
     }
 
-    public static bool TryTruckAnchor(DriftBand band, out int anchorX, out int anchorY, out bool bubbleAbove)
+    public static bool TryTruckAnchor(DriftBand band, int scalePercent, out int anchorX, out int anchorY, out bool bubbleAbove)
     {
         anchorX = 0;
         anchorY = 0;
@@ -264,52 +233,45 @@ public static class SnowRasterizer
         if (!band.Plowing)
             return false;
 
-        SpriteTransform transform = g.Edge switch
-        {
-            TaskbarEdge.Top => SpriteTransform.FlipVertical,
-            TaskbarEdge.Left => SpriteTransform.RotateClockwise,
-            TaskbarEdge.Right => SpriteTransform.RotateCounterClockwise,
-            _ => SpriteTransform.None,
-        };
-        (int bladeX, int bladeY) = Map(KamazSprite.BladeX, KamazSprite.BladeY, transform);
-        (int wheelX, int wheelY) = Map(KamazSprite.WheelX, KamazSprite.WheelY, transform);
-        (int beaconX, int beaconY) = Map(KamazSprite.BeaconX, KamazSprite.BeaconY, transform);
-        int travel = (int)band.Travel;
-        int drawX;
-        int drawY;
-        switch (g.Edge)
-        {
-            case TaskbarEdge.Bottom:
-                drawX = g.X + travel - bladeX;
-                drawY = (g.Y - 1) - wheelY;
-                break;
-            case TaskbarEdge.Top:
-                drawX = g.X + travel - bladeX;
-                drawY = (g.Y + g.Height) - wheelY;
-                break;
-            case TaskbarEdge.Left:
-                drawX = (g.X + g.Width) - wheelX;
-                drawY = g.Y + travel - bladeY;
-                break;
-            default:
-                drawX = (g.X - 1) - wheelX;
-                drawY = g.Y + travel - bladeY;
-                break;
-        }
-
+        KamazSprite.Frame frame = KamazSprite.Measure(scalePercent);
+        SpriteTransform transform = TransformFor(g.Edge);
+        (int drawX, int drawY) = PlaceTruck(g, band.Travel, frame, transform);
+        (int beaconX, int beaconY) = Map(frame.BeaconX, frame.BeaconY, transform, frame);
         anchorX = drawX + beaconX;
         anchorY = drawY + beaconY;
         bubbleAbove = g.Edge != TaskbarEdge.Top;
         return true;
     }
 
-    static (int x, int y) Map(int sx, int sy, SpriteTransform transform)
+    static SpriteTransform TransformFor(TaskbarEdge edge) => edge switch
+    {
+        TaskbarEdge.Top => SpriteTransform.FlipVertical,
+        TaskbarEdge.Left => SpriteTransform.RotateClockwise,
+        TaskbarEdge.Right => SpriteTransform.RotateCounterClockwise,
+        _ => SpriteTransform.None,
+    };
+
+    static (int x, int y) PlaceTruck(TaskbarBand g, float travel, KamazSprite.Frame frame, SpriteTransform transform)
+    {
+        (int bladeX, int bladeY) = Map(frame.BladeX, frame.BladeY, transform, frame);
+        (int wheelX, int wheelY) = Map(frame.WheelX, frame.WheelY, transform, frame);
+        int along = (int)travel;
+        return g.Edge switch
+        {
+            TaskbarEdge.Bottom => (g.X + along - bladeX, (g.Y - 1) - wheelY),
+            TaskbarEdge.Top => (g.X + along - bladeX, (g.Y + g.Height) - wheelY),
+            TaskbarEdge.Left => ((g.X + g.Width) - wheelX, g.Y + along - bladeY),
+            _ => ((g.X - 1) - wheelX, g.Y + along - bladeY),
+        };
+    }
+
+    static (int x, int y) Map(int sx, int sy, SpriteTransform transform, KamazSprite.Frame frame)
     {
         return transform switch
         {
-            SpriteTransform.FlipVertical => (sx, KamazSprite.Height - 1 - sy),
-            SpriteTransform.RotateClockwise => (KamazSprite.Height - 1 - sy, sx),
-            SpriteTransform.RotateCounterClockwise => (sy, KamazSprite.Width - 1 - sx),
+            SpriteTransform.FlipVertical => (sx, frame.Height - 1 - sy),
+            SpriteTransform.RotateClockwise => (frame.Height - 1 - sy, sx),
+            SpriteTransform.RotateCounterClockwise => (sy, frame.Width - 1 - sx),
             _ => (sx, sy),
         };
     }
@@ -368,10 +330,14 @@ public static class SnowRasterizer
         }
     }
 
-    static void BlitSprite(Surface surface, byte[] src, int sw, int sh, int dx, int dy, int fade, SpriteTransform transform)
+    static void BlitSprite(Surface surface, KamazSprite.Frame frame, int dx, int dy, int fade, SpriteTransform transform)
     {
-        int dw = transform is SpriteTransform.RotateClockwise or SpriteTransform.RotateCounterClockwise ? sh : sw;
-        int dh = transform is SpriteTransform.RotateClockwise or SpriteTransform.RotateCounterClockwise ? sw : sh;
+        byte[] src = KamazSprite.Pixels;
+        int sw = KamazSprite.Width;
+        int sh = KamazSprite.Height;
+        bool rotated = transform is SpriteTransform.RotateClockwise or SpriteTransform.RotateCounterClockwise;
+        int dw = rotated ? frame.Height : frame.Width;
+        int dh = rotated ? frame.Width : frame.Height;
         Span<byte> dest = surface.Pixels;
         for (int y = 0; y < dh; y++)
         {
@@ -384,26 +350,31 @@ public static class SnowRasterizer
                 if ((uint)destX >= (uint)surface.Width)
                     continue;
 
-                int sx, sy;
+                int localX, localY;
                 switch (transform)
                 {
                     case SpriteTransform.FlipVertical:
-                        sx = x;
-                        sy = sh - 1 - y;
+                        localX = x;
+                        localY = frame.Height - 1 - y;
                         break;
                     case SpriteTransform.RotateClockwise:
-                        sx = y;
-                        sy = sh - 1 - x;
+                        localX = y;
+                        localY = frame.Height - 1 - x;
                         break;
                     case SpriteTransform.RotateCounterClockwise:
-                        sx = sw - 1 - y;
-                        sy = x;
+                        localX = frame.Width - 1 - y;
+                        localY = x;
                         break;
                     default:
-                        sx = x;
-                        sy = y;
+                        localX = x;
+                        localY = y;
                         break;
                 }
+
+                int sx = frame.Width == sw ? localX : localX * sw / frame.Width;
+                int sy = frame.Height == sh ? localY : localY * sh / frame.Height;
+                if ((uint)sx >= (uint)sw || (uint)sy >= (uint)sh)
+                    continue;
 
                 int si = (sy * sw + sx) * 4;
                 int sa = src[si + 3];

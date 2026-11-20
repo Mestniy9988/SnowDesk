@@ -31,7 +31,7 @@ sealed class BubblePainter
 
         foreach (DriftBand band in simulation.Bands)
         {
-            if (!SnowRasterizer.TryTruckAnchor(band, out int anchorX, out int anchorY, out bool above))
+            if (!SnowRasterizer.TryTruckAnchor(band, simulation.TruckScalePercent, out int anchorX, out int anchorY, out bool above))
                 continue;
 
             SpeechBubble.Placement place = SpeechBubble.Place(

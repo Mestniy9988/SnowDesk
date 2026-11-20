@@ -10,6 +10,8 @@ public sealed class AppSettings
     public int Volume { get; set; } = 25;
     public bool Muted { get; set; }
     public string? MusicPath { get; set; }
+    public bool Repeat { get; set; } = true;
+    public int TruckScalePercent { get; set; } = 100;
     public string PlowMessage { get; set; } = SpeechBubble.DefaultText;
     public bool ShowPlowMessage { get; set; } = true;
     public bool TaskbarSnow { get; set; } = true;
@@ -22,6 +24,7 @@ public sealed class AppSettings
     {
         Intensity = Math.Clamp(Intensity, 1, 100);
         Volume = Math.Clamp(Volume, 0, 100);
+        TruckScalePercent = KamazSprite.ClampPercent(TruckScalePercent);
         PlowIntervalMinutes = Math.Clamp(PlowIntervalMinutes, 1, 120);
         if (string.IsNullOrWhiteSpace(MusicPath))
             MusicPath = null;

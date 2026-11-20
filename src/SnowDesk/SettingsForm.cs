@@ -11,6 +11,9 @@ sealed class SettingsForm : Form
     readonly Label _volumeValue;
     readonly CheckBox _mute;
     readonly Label _music;
+    readonly CheckBox _repeat;
+    readonly TrackBar _truck;
+    readonly Label _truckValue;
     readonly CheckBox _taskbar;
     readonly NumericUpDown _plow;
     readonly CheckBox _autostart;
@@ -54,6 +57,9 @@ sealed class SettingsForm : Form
         _volumeValue = ValueLabel();
         _mute = new CheckBox { Text = "Без звука", AutoSize = true };
         _music = new Label { AutoSize = false, Height = 36, AutoEllipsis = true };
+        _repeat = new CheckBox { Text = "На повторе", AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
+        _truck = Slider(KamazSprite.MinPercent, KamazSprite.MaxPercent);
+        _truckValue = ValueLabel();
         _taskbar = new CheckBox { Text = "Копить сугроб на панели задач", AutoSize = true };
         _plow = new NumericUpDown { Minimum = 1, Maximum = 120, Width = 70 };
         _autostart = new CheckBox { Text = "Автозапуск с Windows", AutoSize = true };
@@ -83,6 +89,14 @@ sealed class SettingsForm : Form
             _changed();
         };
         _mute.CheckedChanged += (_, _) => Change(() => _settings.Muted = _mute.Checked);
+        _repeat.CheckedChanged += (_, _) => Change(() => _settings.Repeat = _repeat.Checked);
+        _truck.Scroll += (_, _) =>
+        {
+            if (_binding) return;
+            _settings.TruckScalePercent = _truck.Value;
+            _truckValue.Text = _truck.Value + "%";
+            _changed();
+        };
         _taskbar.CheckedChanged += (_, _) => Change(() => _settings.TaskbarSnow = _taskbar.Checked);
         _plow.ValueChanged += (_, _) => Change(() => _settings.PlowIntervalMinutes = (int)_plow.Value);
         _autostart.CheckedChanged += (_, _) => Change(() => _settings.StartWithWindows = _autostart.Checked);
@@ -118,6 +132,7 @@ sealed class SettingsForm : Form
         var musicButtons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top };
         musicButtons.Controls.Add(GhostButton("Выбрать файл…", chooseMusic));
         musicButtons.Controls.Add(GhostButton("Встроенная", resetMusic));
+        musicButtons.Controls.Add(_repeat);
 
         var plowRow = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, WrapContents = false };
         plowRow.Controls.Add(new Label { Text = "Интервал, минут", AutoSize = true, Margin = new Padding(0, 8, 8, 0) });
@@ -158,6 +173,8 @@ sealed class SettingsForm : Form
         Add(musicButtons);
         Add(Section("Панель задач"), 24);
         Add(_taskbar);
+        Add(Pair("Размер КАМАЗа", _truckValue), 26);
+        Add(_truck, 36);
         Add(plowRow);
         Add(new Label { Text = "Сообщение КАМАЗа", AutoSize = true });
         Add(_message, 72);
@@ -189,6 +206,9 @@ sealed class SettingsForm : Form
         _intensity.Value = Math.Clamp(_settings.Intensity, 1, 100);
         _volume.Value = Math.Clamp(_settings.Volume, 0, 100);
         _mute.Checked = _settings.Muted;
+        _repeat.Checked = _settings.Repeat;
+        _truck.Value = Math.Clamp(_settings.TruckScalePercent, KamazSprite.MinPercent, KamazSprite.MaxPercent);
+        _truckValue.Text = _truck.Value + "%";
         _taskbar.Checked = _settings.TaskbarSnow;
         _plow.Value = Math.Clamp(_settings.PlowIntervalMinutes, 1, 120);
         _autostart.Checked = _settings.StartWithWindows;

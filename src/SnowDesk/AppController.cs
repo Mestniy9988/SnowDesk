@@ -152,6 +152,7 @@ sealed class AppController : ApplicationContext
         {
             _scene = _observation.Scene;
             _sim.Intensity = _settings.Intensity;
+            _sim.TruckScalePercent = _settings.TruckScalePercent;
             _sim.TaskbarSnow = _settings.TaskbarSnow;
             _sim.PlowIntervalMinutes = _settings.PlowIntervalMinutes;
             _sim.Update(dt, _scene);
@@ -248,7 +249,7 @@ sealed class AppController : ApplicationContext
             return;
         }
 
-        _audio.Play(_settings.MusicPath, _director.AudioLevel);
+        _audio.Play(_settings.MusicPath, _director.AudioLevel, _settings.Repeat);
         if (_audio.LastError != null && _audio.LastError != _announcedAudioError)
         {
             _announcedAudioError = _audio.LastError;

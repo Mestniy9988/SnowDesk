@@ -10,12 +10,14 @@ sealed class AudioEngine : IDisposable
     WaveOutEvent? _output;
     WaveStream? _source;
     GainProvider? _gain;
+    FadeLoop? _fade;
+    readonly PlaybackGate _played = new();
     string _key = "";
     string? _rejected;
 
     public string? LastError { get; private set; }
 
-    public void Play(string? path, float level)
+    public void Play(string? path, float level, bool repeat)
     {
         lock (_gate)
         {
@@ -28,19 +30,32 @@ sealed class AudioEngine : IDisposable
                 _rejected = null;
             if (_rejected != null && _rejected == path)
                 key = "";
-            if (_output != null && _key == key)
+            bool loop = FadeLoop.ShouldLoop(key.Length == 0, repeat);
+            string? gatePath = key.Length == 0 ? null : key;
+            if (_output != null && _fade != null && _key == key)
             {
+                _fade.Loop = loop;
                 if (_gain != null)
                     _gain.Volume = level;
-                if (_output.PlaybackState != PlaybackState.Playing)
-                    _output.Play();
+                if (_output.PlaybackState == PlaybackState.Playing)
+                    return;
+                if (_fade.Completed)
+                    _played.MarkFinished();
+                if (!_played.Allow(gatePath, repeat))
+                    return;
+                if (_fade.Completed)
+                    _fade.Rewind();
+                _output.Play();
                 return;
             }
 
-            StopLocked();
+            if (!_played.Allow(gatePath, repeat))
+                return;
+
+            StopLocked(resetGate: false);
             try
             {
-                LoadLocked(key);
+                LoadLocked(key, loop);
                 if (_gain != null)
                     _gain.Volume = level;
                 _output?.Play();
@@ -54,12 +69,12 @@ sealed class AudioEngine : IDisposable
                 LastError = ex.Message;
                 if (key.Length > 0)
                     _rejected = key;
-                StopLocked();
+                StopLocked(resetGate: false);
                 if (key.Length == 0)
                     return;
                 try
                 {
-                    LoadLocked("");
+                    LoadLocked("", loop: true);
                     if (_gain != null)
                         _gain.Volume = level;
                     _output?.Play();
@@ -67,7 +82,7 @@ sealed class AudioEngine : IDisposable
                 catch (Exception fallback) when (fallback is not OutOfMemoryException)
                 {
                     LastError = fallback.Message;
-                    StopLocked();
+                    StopLocked(resetGate: false);
                 }
             }
         }
@@ -82,24 +97,46 @@ sealed class AudioEngine : IDisposable
     public void Stop()
     {
         lock (_gate)
-            StopLocked();
+            StopLocked(resetGate: true);
     }
 
     public void Dispose() => Stop();
 
-    void LoadLocked(string key)
+    void LoadLocked(string key, bool loop)
     {
         WaveStream? stream = null;
         WaveOutEvent? output = null;
         try
         {
             stream = Open(key);
-            var loop = new CrossfadeLoop(stream);
-            var gain = new GainProvider(loop);
+            WaveStream source = stream;
+            ISampleProvider samples = source.ToSampleProvider();
+            int channels = Math.Max(1, source.WaveFormat.Channels);
+            int block = Math.Max(1, source.WaveFormat.BlockAlign);
+            int frames = (int)Math.Min(int.MaxValue, Math.Max(0, source.Length / block));
+            var fade = new FadeLoop(
+                channels,
+                source.WaveFormat.SampleRate,
+                frames,
+                samples.Read,
+                () =>
+                {
+                    long framesLeft = Math.Max(0, (source.Length - source.Position) / block);
+                    long count = framesLeft * channels;
+                    return count > int.MaxValue ? int.MaxValue : (int)count;
+                },
+                sample =>
+                {
+                    long position = (long)(sample / channels) * block;
+                    source.Position = position < 0 ? 0 : position > source.Length ? source.Length : position;
+                })
+            { Loop = loop };
+            var gain = new GainProvider(new FadeSource(fade, samples.WaveFormat));
             output = new WaveOutEvent { DesiredLatency = 180 };
             output.Init(gain);
             _source = stream;
             _gain = gain;
+            _fade = fade;
             _output = output;
             _key = key;
             stream = null;
@@ -126,7 +163,7 @@ sealed class AudioEngine : IDisposable
         return new AudioFileReader(key);
     }
 
-    void StopLocked()
+    void StopLocked(bool resetGate)
     {
         try
         {
@@ -141,104 +178,23 @@ sealed class AudioEngine : IDisposable
         _output = null;
         _source = null;
         _gain = null;
+        _fade = null;
         _key = "";
+        if (resetGate)
+            _played.Reset();
     }
 
-    /// <summary>
-    /// Loops a file and mixes about 60 ms of the ending into the beginning
-    /// so an MP3 (including 320 kbps stereo 44.1 kHz) does not click at the join.
-    /// </summary>
-    sealed class CrossfadeLoop : ISampleProvider
+    sealed class FadeSource : ISampleProvider
     {
-        readonly WaveStream _source;
-        readonly ISampleProvider _samples;
-        readonly float[] _head;
-        readonly int _channels;
-        readonly int _fadeSamples;
-        bool _primed;
-
-        public CrossfadeLoop(WaveStream source)
+        readonly FadeLoop _loop;
+        public FadeSource(FadeLoop loop, WaveFormat format)
         {
-            _source = source;
-            _samples = source.ToSampleProvider();
-            _channels = Math.Max(1, source.WaveFormat.Channels);
-            int frames = (int)(source.WaveFormat.SampleRate * 0.06);
-            long totalFrames = source.Length / Math.Max(1, source.WaveFormat.BlockAlign);
-            if (totalFrames < frames * 3)
-                frames = (int)Math.Max(0, totalFrames / 4);
-            _fadeSamples = frames * _channels;
-            _head = new float[Math.Max(1, _fadeSamples)];
+            _loop = loop;
+            WaveFormat = format;
         }
 
-        public WaveFormat WaveFormat => _samples.WaveFormat;
-
-        public int Read(float[] buffer, int offset, int count)
-        {
-            if (!_primed)
-                Prime();
-
-            int written = 0;
-            int guard = 0;
-            while (written < count && guard++ < 8)
-            {
-                int block = Math.Max(1, _source.WaveFormat.BlockAlign);
-                long framesLeft = Math.Max(0, (_source.Length - _source.Position) / block);
-                int samplesLeft = (int)Math.Min(int.MaxValue, framesLeft * _channels);
-                if (samplesLeft <= 0)
-                {
-                    _source.Position = 0;
-                    continue;
-                }
-
-                if (_fadeSamples > 0 && samplesLeft <= _fadeSamples)
-                {
-                    int take = Math.Min(count - written, samplesLeft);
-                    var tail = new float[take];
-                    int got = _samples.Read(tail, 0, take);
-                    if (got <= 0)
-                    {
-                        _source.Position = 0;
-                        continue;
-                    }
-
-                    int fadePos = _fadeSamples - samplesLeft;
-                    for (int i = 0; i < got; i++)
-                    {
-                        float weight = Math.Clamp((fadePos + i + 1) / (float)_fadeSamples, 0f, 1f);
-                        int headIndex = Math.Clamp(fadePos + i, 0, _head.Length - 1);
-                        buffer[offset + written + i] = tail[i] * (1f - weight) + _head[headIndex] * weight;
-                    }
-
-                    written += got;
-                    if (_source.Position >= _source.Length - block)
-                        _source.Position = (long)(_fadeSamples / _channels) * block;
-                    continue;
-                }
-
-                int before = Math.Min(count - written, samplesLeft - _fadeSamples);
-                int read = _samples.Read(buffer, offset + written, before);
-                if (read <= 0)
-                {
-                    _source.Position = 0;
-                    continue;
-                }
-
-                written += read;
-            }
-
-            return written;
-        }
-
-        void Prime()
-        {
-            _primed = true;
-            if (_fadeSamples <= 0)
-                return;
-            int got = _samples.Read(_head, 0, _head.Length);
-            if (got < _head.Length)
-                Array.Clear(_head, got, _head.Length - got);
-            _source.Position = 0;
-        }
+        public WaveFormat WaveFormat { get; }
+        public int Read(float[] buffer, int offset, int count) => _loop.Read(buffer, offset, count);
     }
 
     sealed class GainProvider : ISampleProvider
