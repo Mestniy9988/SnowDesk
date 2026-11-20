@@ -244,6 +244,9 @@ static class NativeMethods
     [DllImport("kernel32.dll")]
     public static extern bool GetSystemPowerStatus(out SystemPowerStatus lpSystemPowerStatus);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+
     public static bool IsBatterySaverOn()
     {
         if (!GetSystemPowerStatus(out SystemPowerStatus status))

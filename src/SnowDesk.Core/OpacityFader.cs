@@ -29,7 +29,9 @@ public sealed class OpacityFader
             return;
         }
 
-        _rate = distance / MathF.Max(0.05f, seconds);
+        // Constant speed across the whole 0..1 range, so a fade that is reversed
+        // halfway finishes in half the time instead of restarting the full duration.
+        _rate = 1f / MathF.Max(0.05f, seconds);
         Animating = true;
     }
 

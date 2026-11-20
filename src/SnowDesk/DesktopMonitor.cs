@@ -26,6 +26,12 @@ sealed class DesktopMonitor : IDisposable
         _proc = OnWinEvent;
     }
 
+    public static bool PreviewMode { get; set; }
+
+    public static string PreviewBusyFile =>
+        Environment.GetEnvironmentVariable("SNOWDESK_PREVIEW_BUSY")
+        ?? Path.Combine(Path.GetTempPath(), "SnowDesk.preview-busy");
+
     public event Action? Activity;
 
     public void Start()
@@ -51,20 +57,47 @@ sealed class DesktopMonitor : IDisposable
 
     public DesktopObservation Query()
     {
-        var windows = new List<WindowFacts>(64);
-        NativeMethods.EnumWindows((hwnd, _) =>
+        if (PreviewMode)
         {
-            windows.Add(Describe(hwnd));
-            return true;
-        }, IntPtr.Zero);
+            bool busy = File.Exists(PreviewBusyFile);
+            Scene scene = TryBuildScene();
+            if (scene.Width < 320 || scene.Height < 240)
+                scene = FallbackScene();
+            return busy
+                ? new DesktopObservation(false, false, "Окно проверки", "PreviewWindow", scene)
+                : new DesktopObservation(true, false, null, null, scene);
+        }
 
-        WindowFacts? blocker = DesktopClassifier.FirstBlocker(windows);
-        return new DesktopObservation(
-            DesktopClassifier.IsDesktopFree(windows),
-            DesktopClassifier.HasFullscreenBlocker(windows),
-            blocker?.Title,
-            blocker?.ClassName,
-            BuildScene());
+        try
+        {
+            var windows = new List<WindowFacts>(64);
+            NativeMethods.EnumWindows((hwnd, _) =>
+            {
+                try
+                {
+                    windows.Add(Describe(hwnd));
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    System.Diagnostics.Debug.WriteLine(ex);
+                }
+
+                return true;
+            }, IntPtr.Zero);
+
+            WindowFacts? blocker = DesktopClassifier.FirstBlocker(windows);
+            return new DesktopObservation(
+                DesktopClassifier.IsDesktopFree(windows),
+                DesktopClassifier.HasFullscreenBlocker(windows),
+                blocker?.Title,
+                blocker?.ClassName,
+                TryBuildScene());
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+            return new DesktopObservation(false, false, "ошибка опроса", "SnowDesk", TryBuildScene());
+        }
     }
 
     public void Dispose()
@@ -97,9 +130,7 @@ sealed class DesktopMonitor : IDisposable
         var title = new StringBuilder(512);
         NativeMethods.GetWindowText(hwnd, title, title.Capacity);
         NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
-        int cloaked = 0;
-        bool isCloaked = NativeMethods.DwmGetWindowAttribute(hwnd, NativeMethods.DwmwaCloaked, out cloaked, sizeof(int)) == 0
-                         && cloaked != 0;
+        bool isCloaked = IsCloaked(hwnd);
         long exStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
         bool tool = (exStyle & NativeMethods.WsExToolWindow) != 0;
         bool app = (exStyle & NativeMethods.WsExAppWindow) != 0;
@@ -121,6 +152,20 @@ sealed class DesktopMonitor : IDisposable
             title.ToString());
     }
 
+    static bool IsCloaked(IntPtr hwnd)
+    {
+        try
+        {
+            int cloaked = 0;
+            return NativeMethods.DwmGetWindowAttribute(hwnd, NativeMethods.DwmwaCloaked, out cloaked, sizeof(int)) == 0
+                   && cloaked != 0;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
+
     static bool CoversMonitor(IntPtr hwnd, NativeMethods.Rect rect)
     {
         IntPtr monitor = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MonitorDefaultToNearest);
@@ -134,6 +179,36 @@ sealed class DesktopMonitor : IDisposable
                && rect.Right >= screen.Right - 4
                && rect.Bottom >= screen.Bottom - 4;
     }
+
+    static Scene TryBuildScene()
+    {
+        try
+        {
+            return BuildScene();
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return FallbackScene();
+        }
+    }
+
+    public static Scene FallbackScene() => new()
+    {
+        Width = 1280,
+        Height = 720,
+        Taskbars =
+        [
+            new TaskbarBand
+            {
+                Id = "fallback:Bottom:0:680:1280:40:False",
+                Edge = TaskbarEdge.Bottom,
+                X = 0,
+                Y = 680,
+                Width = 1280,
+                Height = 40,
+            },
+        ],
+    };
 
     static Scene BuildScene()
     {
@@ -169,8 +244,10 @@ sealed class DesktopMonitor : IDisposable
             return;
 
         var edge = (TaskbarEdge)Math.Clamp((int)data.uEdge, 0, 3);
-        NativeMethods.Rect rect = autoHide ? PinToMonitorEdge(data.rc, edge) : data.rc;
-        bars.Add(ToBand(rect, edge, autoHide, originX, originY, "primary"));
+        PixelRect rect = ToPixel(data.rc);
+        if (autoHide)
+            rect = PinToMonitorEdge(rect, edge);
+        bars.Add(TaskbarLayout.ToBand(rect, edge, autoHide, originX, originY, "primary"));
     }
 
     static void AddSecondaryTaskbars(List<TaskbarBand> bars, int originX, int originY, bool autoHide)
@@ -185,78 +262,46 @@ sealed class DesktopMonitor : IDisposable
             if (!NativeMethods.GetWindowRect(hwnd, out NativeMethods.Rect rect))
                 return true;
 
-            TaskbarEdge edge = GuessEdge(hwnd, rect);
+            PixelRect pixels = ToPixel(rect);
+            TaskbarEdge edge = GuessEdge(hwnd, pixels);
             bool thin = edge is TaskbarEdge.Top or TaskbarEdge.Bottom
-                ? rect.Bottom - rect.Top <= 4
-                : rect.Right - rect.Left <= 4;
+                ? pixels.Height <= 4
+                : pixels.Width <= 4;
             bool hide = autoHide || thin;
             if (hide)
-                rect = PinToMonitorEdge(rect, edge);
-            bars.Add(ToBand(rect, edge, hide, originX, originY, "secondary" + index));
+                pixels = PinToMonitorEdge(pixels, edge);
+            bars.Add(TaskbarLayout.ToBand(pixels, edge, hide, originX, originY, "secondary" + index));
             index++;
             return true;
         }, IntPtr.Zero);
     }
 
-    static TaskbarEdge GuessEdge(IntPtr hwnd, NativeMethods.Rect rect)
+    static TaskbarEdge GuessEdge(IntPtr hwnd, PixelRect rect)
     {
         IntPtr monitor = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MonitorDefaultToNearest);
         var info = new NativeMethods.MonitorInfo { cbSize = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
         if (monitor == IntPtr.Zero || !NativeMethods.GetMonitorInfo(monitor, ref info))
             return TaskbarEdge.Bottom;
 
-        NativeMethods.Rect screen = info.rcMonitor;
-        int width = rect.Right - rect.Left;
-        int height = rect.Bottom - rect.Top;
-        if (width >= height)
-        {
-            int toTop = Math.Abs(rect.Top - screen.Top);
-            int toBottom = Math.Abs(screen.Bottom - rect.Bottom);
-            return toTop < toBottom ? TaskbarEdge.Top : TaskbarEdge.Bottom;
-        }
-
-        int toLeft = Math.Abs(rect.Left - screen.Left);
-        int toRight = Math.Abs(screen.Right - rect.Right);
-        return toLeft < toRight ? TaskbarEdge.Left : TaskbarEdge.Right;
+        return TaskbarLayout.GuessEdge(rect, ToPixel(info.rcMonitor));
     }
 
-    static NativeMethods.Rect PinToMonitorEdge(NativeMethods.Rect hint, TaskbarEdge edge)
+    static PixelRect PinToMonitorEdge(PixelRect hint, TaskbarEdge edge)
     {
-        IntPtr monitor = NativeMethods.MonitorFromRect(ref hint, NativeMethods.MonitorDefaultToNearest);
+        NativeMethods.Rect native = new()
+        {
+            Left = hint.Left,
+            Top = hint.Top,
+            Right = hint.Right,
+            Bottom = hint.Bottom,
+        };
+        IntPtr monitor = NativeMethods.MonitorFromRect(ref native, NativeMethods.MonitorDefaultToNearest);
         var info = new NativeMethods.MonitorInfo { cbSize = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
         if (monitor == IntPtr.Zero || !NativeMethods.GetMonitorInfo(monitor, ref info))
             return hint;
 
-        NativeMethods.Rect screen = info.rcMonitor;
-        return edge switch
-        {
-            TaskbarEdge.Top => new NativeMethods.Rect { Left = screen.Left, Top = screen.Top, Right = screen.Right, Bottom = screen.Top },
-            TaskbarEdge.Left => new NativeMethods.Rect { Left = screen.Left, Top = screen.Top, Right = screen.Left, Bottom = screen.Bottom },
-            TaskbarEdge.Right => new NativeMethods.Rect { Left = screen.Right, Top = screen.Top, Right = screen.Right, Bottom = screen.Bottom },
-            _ => new NativeMethods.Rect { Left = screen.Left, Top = screen.Bottom, Right = screen.Right, Bottom = screen.Bottom },
-        };
+        return TaskbarLayout.PinToEdge(ToPixel(info.rcMonitor), edge);
     }
 
-    static TaskbarBand ToBand(NativeMethods.Rect rect, TaskbarEdge edge, bool autoHide, int originX, int originY, string name)
-    {
-        int x = rect.Left - originX;
-        int y = rect.Top - originY;
-        int w = Math.Max(edge is TaskbarEdge.Left or TaskbarEdge.Right ? 0 : 1, rect.Right - rect.Left);
-        int h = Math.Max(edge is TaskbarEdge.Top or TaskbarEdge.Bottom ? 0 : 1, rect.Bottom - rect.Top);
-        if (edge is TaskbarEdge.Top or TaskbarEdge.Bottom && w < 1)
-            w = 1;
-        if (edge is TaskbarEdge.Left or TaskbarEdge.Right && h < 1)
-            h = 1;
-
-        return new TaskbarBand
-        {
-            Id = $"{name}:{edge}:{x}:{y}:{w}:{h}:{autoHide}",
-            Edge = edge,
-            X = x,
-            Y = y,
-            Width = w,
-            Height = h,
-            AutoHide = autoHide,
-        };
-    }
+    static PixelRect ToPixel(NativeMethods.Rect rect) => new(rect.Left, rect.Top, rect.Right, rect.Bottom);
 }

@@ -18,6 +18,20 @@ public sealed class FrameBuffer
     public void Clear() => Array.Clear(Pixels);
 }
 
+public readonly ref struct Surface
+{
+    public readonly Span<byte> Pixels;
+    public readonly int Width;
+    public readonly int Height;
+
+    public Surface(Span<byte> pixels, int width, int height)
+    {
+        Pixels = pixels;
+        Width = width;
+        Height = height;
+    }
+}
+
 public enum SpriteTransform
 {
     None,
@@ -29,14 +43,23 @@ public enum SpriteTransform
 public static class SnowRasterizer
 {
     public static void Render(FrameBuffer buffer, SnowSimulation simulation, float opacity)
+        => Render(buffer.Pixels, buffer.Width, buffer.Height, simulation, opacity);
+
+    public static void Render(Span<byte> pixels, int width, int height, SnowSimulation simulation, float opacity)
     {
-        if (opacity <= 0.001f)
+        long bytes = (long)width * height * 4;
+        if (opacity <= 0.001f || width <= 0 || height <= 0 || bytes > pixels.Length)
             return;
 
+        Draw(new Surface(pixels, width, height), simulation, opacity);
+    }
+
+    static void Draw(Surface surface, SnowSimulation simulation, float opacity)
+    {
         int fade = (int)Math.Clamp(opacity * 255f, 0f, 255f);
         IReadOnlyList<Flake> flakes = simulation.Flakes;
         for (int i = 0; i < flakes.Count; i++)
-            DrawFlake(buffer, flakes[i], fade);
+            DrawFlake(surface, flakes[i], fade);
 
         if (!simulation.TaskbarSnow)
             return;
@@ -45,14 +68,14 @@ public static class SnowRasterizer
         for (int i = 0; i < bands.Count; i++)
         {
             DriftBand band = bands[i];
-            DrawDrift(buffer, band, fade);
-            DrawPuffs(buffer, band, fade);
+            DrawDrift(surface, band, fade);
+            DrawPuffs(surface, band, fade);
             if (band.Plowing)
-                DrawTruck(buffer, band, fade);
+                DrawTruck(surface, band, fade);
         }
     }
 
-    static void DrawFlake(FrameBuffer buffer, Flake flake, int fade)
+    static void DrawFlake(Surface surface, Flake flake, int fade)
     {
         int sprite = flake.Sprite;
         if ((uint)sprite >= (uint)FlakeSprites.Masks.Length)
@@ -62,17 +85,17 @@ public static class SnowRasterizer
         int alpha = (int)(flake.Alpha * fade);
         int x = (int)flake.X - diameter / 2;
         int y = (int)flake.Y - diameter / 2;
-        BlitMask(buffer, FlakeSprites.Masks[sprite], diameter, x, y, alpha, 248, 250, 255);
+        BlitMask(surface, FlakeSprites.Masks[sprite], diameter, x, y, alpha, 248, 250, 255);
 
         if (flake.Speed > 170f)
         {
             int ghost = alpha * 2 / 5;
             int lift = Math.Max(2, (int)(flake.Size * 0.85f));
-            BlitMask(buffer, FlakeSprites.Masks[sprite], diameter, x, y - lift, ghost, 248, 250, 255);
+            BlitMask(surface, FlakeSprites.Masks[sprite], diameter, x, y - lift, ghost, 248, 250, 255);
         }
     }
 
-    static void DrawPuffs(FrameBuffer buffer, DriftBand band, int fade)
+    static void DrawPuffs(Surface surface, DriftBand band, int fade)
     {
         List<SnowPuff> puffs = band.Puffs;
         for (int i = 0; i < puffs.Count; i++)
@@ -82,12 +105,12 @@ public static class SnowRasterizer
             int diameter = FlakeSprites.Diameters[sprite];
             float life = puff.MaxLife <= 0f ? 0f : puff.Life / puff.MaxLife;
             int alpha = (int)(fade * life);
-            BlitMask(buffer, FlakeSprites.Masks[sprite], diameter,
+            BlitMask(surface, FlakeSprites.Masks[sprite], diameter,
                 (int)puff.X - diameter / 2, (int)puff.Y - diameter / 2, alpha, 255, 255, 255);
         }
     }
 
-    static void DrawDrift(FrameBuffer buffer, DriftBand band, int fade)
+    static void DrawDrift(Surface surface, DriftBand band, int fade)
     {
         TaskbarBand g = band.Geometry;
         float[] heights = band.Heights;
@@ -101,7 +124,7 @@ public static class SnowRasterizer
                         continue;
                     int x = g.X + column;
                     int y0 = (int)MathF.Floor(g.Y - height);
-                    FillVertical(buffer, x, y0, g.Y, fade, crestAtStart: true);
+                    FillVertical(surface, x, y0, g.Y, fade, crestAtStart: true);
                 }
                 break;
             case TaskbarEdge.Top:
@@ -112,7 +135,7 @@ public static class SnowRasterizer
                         continue;
                     int x = g.X + column;
                     int y0 = g.Y + g.Height;
-                    FillVertical(buffer, x, y0, y0 + (int)MathF.Ceiling(height), fade, crestAtStart: false);
+                    FillVertical(surface, x, y0, y0 + (int)MathF.Ceiling(height), fade, crestAtStart: false);
                 }
                 break;
             case TaskbarEdge.Left:
@@ -123,7 +146,7 @@ public static class SnowRasterizer
                         continue;
                     int y = g.Y + column;
                     int x0 = g.X + g.Width;
-                    FillHorizontal(buffer, y, x0, x0 + (int)MathF.Ceiling(height), fade, crestAtStart: false);
+                    FillHorizontal(surface, y, x0, x0 + (int)MathF.Ceiling(height), fade, crestAtStart: false);
                 }
                 break;
             default:
@@ -134,46 +157,46 @@ public static class SnowRasterizer
                         continue;
                     int y = g.Y + column;
                     int x1 = g.X;
-                    FillHorizontal(buffer, y, x1 - (int)MathF.Ceiling(height), x1, fade, crestAtStart: true);
+                    FillHorizontal(surface, y, x1 - (int)MathF.Ceiling(height), x1, fade, crestAtStart: true);
                 }
                 break;
         }
     }
 
-    static void FillVertical(FrameBuffer buffer, int x, int y0, int y1, int fade, bool crestAtStart)
+    static void FillVertical(Surface surface, int x, int y0, int y1, int fade, bool crestAtStart)
     {
-        if ((uint)x >= (uint)buffer.Width)
+        if ((uint)x >= (uint)surface.Width)
             return;
         if (y0 > y1)
             (y0, y1) = (y1, y0);
         int span = Math.Max(1, y1 - y0);
         int start = Math.Max(0, y0);
-        int end = Math.Min(buffer.Height, y1);
+        int end = Math.Min(surface.Height, y1);
         for (int y = start; y < end; y++)
         {
             float along = (y - y0) / (float)span;
             float crest = crestAtStart ? along : 1f - along;
             int alpha = CrestAlpha(crest, fade);
-            Blend(buffer.Pixels, (y * buffer.Width + x) * 4, 255, 250, 248, alpha);
+            Blend(surface.Pixels, (y * surface.Width + x) * 4, 255, 250, 248, alpha);
         }
     }
 
-    static void FillHorizontal(FrameBuffer buffer, int y, int x0, int x1, int fade, bool crestAtStart)
+    static void FillHorizontal(Surface surface, int y, int x0, int x1, int fade, bool crestAtStart)
     {
-        if ((uint)y >= (uint)buffer.Height)
+        if ((uint)y >= (uint)surface.Height)
             return;
         if (x0 > x1)
             (x0, x1) = (x1, x0);
         int span = Math.Max(1, x1 - x0);
         int start = Math.Max(0, x0);
-        int end = Math.Min(buffer.Width, x1);
-        int row = y * buffer.Width;
+        int end = Math.Min(surface.Width, x1);
+        int row = y * surface.Width;
         for (int x = start; x < end; x++)
         {
             float along = (x - x0) / (float)span;
             float crest = crestAtStart ? along : 1f - along;
             int alpha = CrestAlpha(crest, fade);
-            Blend(buffer.Pixels, (row + x) * 4, 255, 250, 248, alpha);
+            Blend(surface.Pixels, (row + x) * 4, 255, 250, 248, alpha);
         }
     }
 
@@ -183,7 +206,7 @@ public static class SnowRasterizer
         return (int)(230f * edge * fade / 255f);
     }
 
-    static void DrawTruck(FrameBuffer buffer, DriftBand band, int fade)
+    static void DrawTruck(Surface surface, DriftBand band, int fade)
     {
         TaskbarBand g = band.Geometry;
         SpriteTransform transform = g.Edge switch
@@ -221,15 +244,15 @@ public static class SnowRasterizer
                 break;
         }
 
-        BlitSprite(buffer, KamazSprite.Pixels, KamazSprite.Width, KamazSprite.Height, drawX, drawY, fade, transform);
+        BlitSprite(surface, KamazSprite.Pixels, KamazSprite.Width, KamazSprite.Height, drawX, drawY, fade, transform);
 
         bool lampOn = (band.Blink % 0.62f) < 0.16f;
         int lampX = drawX + beaconX;
         int lampY = drawY + beaconY;
         if (lampOn)
-            DrawGlow(buffer, lampX, lampY, 5, fade, 60, 210, 255);
+            DrawGlow(surface, lampX, lampY, 5, fade, 60, 210, 255);
         else
-            DrawGlow(buffer, lampX, lampY, 2, fade / 2, 40, 120, 160);
+            DrawGlow(surface, lampX, lampY, 2, fade / 2, 40, 120, 160);
     }
 
     static (int x, int y) Map(int sx, int sy, SpriteTransform transform)
@@ -243,16 +266,16 @@ public static class SnowRasterizer
         };
     }
 
-    static void DrawGlow(FrameBuffer buffer, int cx, int cy, int radius, int fade, byte b, byte g, byte r)
+    static void DrawGlow(Surface surface, int cx, int cy, int radius, int fade, byte b, byte g, byte r)
     {
         int r2 = radius * radius;
         for (int y = cy - radius; y <= cy + radius; y++)
         {
-            if ((uint)y >= (uint)buffer.Height)
+            if ((uint)y >= (uint)surface.Height)
                 continue;
             for (int x = cx - radius; x <= cx + radius; x++)
             {
-                if ((uint)x >= (uint)buffer.Width)
+                if ((uint)x >= (uint)surface.Width)
                     continue;
                 int dx = x - cx;
                 int dy = y - cy;
@@ -261,25 +284,25 @@ public static class SnowRasterizer
                     continue;
                 float t = 1f - d2 / (float)(r2 + 1);
                 int alpha = (int)(fade * t);
-                Blend(buffer.Pixels, (y * buffer.Width + x) * 4, b, g, r, alpha);
+                Blend(surface.Pixels, (y * surface.Width + x) * 4, b, g, r, alpha);
             }
         }
     }
 
-    static void BlitMask(FrameBuffer buffer, byte[] mask, int diameter, int dx, int dy, int alpha, byte b, byte g, byte r)
+    static void BlitMask(Surface surface, byte[] mask, int diameter, int dx, int dy, int alpha, byte b, byte g, byte r)
     {
         if (alpha <= 0)
             return;
 
         int x0 = Math.Max(0, -dx);
         int y0 = Math.Max(0, -dy);
-        int x1 = Math.Min(diameter, buffer.Width - dx);
-        int y1 = Math.Min(diameter, buffer.Height - dy);
+        int x1 = Math.Min(diameter, surface.Width - dx);
+        int y1 = Math.Min(diameter, surface.Height - dy);
         if (x0 >= x1 || y0 >= y1)
             return;
 
-        byte[] dest = buffer.Pixels;
-        int stride = buffer.Width;
+        Span<byte> dest = surface.Pixels;
+        int stride = surface.Width;
         for (int y = y0; y < y1; y++)
         {
             int row = (dy + y) * stride + dx;
@@ -297,20 +320,20 @@ public static class SnowRasterizer
         }
     }
 
-    static void BlitSprite(FrameBuffer buffer, byte[] src, int sw, int sh, int dx, int dy, int fade, SpriteTransform transform)
+    static void BlitSprite(Surface surface, byte[] src, int sw, int sh, int dx, int dy, int fade, SpriteTransform transform)
     {
         int dw = transform is SpriteTransform.RotateClockwise or SpriteTransform.RotateCounterClockwise ? sh : sw;
         int dh = transform is SpriteTransform.RotateClockwise or SpriteTransform.RotateCounterClockwise ? sw : sh;
-        byte[] dest = buffer.Pixels;
+        Span<byte> dest = surface.Pixels;
         for (int y = 0; y < dh; y++)
         {
             int destY = dy + y;
-            if ((uint)destY >= (uint)buffer.Height)
+            if ((uint)destY >= (uint)surface.Height)
                 continue;
             for (int x = 0; x < dw; x++)
             {
                 int destX = dx + x;
-                if ((uint)destX >= (uint)buffer.Width)
+                if ((uint)destX >= (uint)surface.Width)
                     continue;
 
                 int sx, sy;
@@ -341,12 +364,12 @@ public static class SnowRasterizer
                 int a = (sa * fade) >> 8;
                 if (a == 0)
                     continue;
-                Blend(dest, (destY * buffer.Width + destX) * 4, src[si], src[si + 1], src[si + 2], a);
+                Blend(dest, (destY * surface.Width + destX) * 4, src[si], src[si + 1], src[si + 2], a);
             }
         }
     }
 
-    static void Blend(byte[] pixels, int index, byte b, byte g, byte r, int alpha)
+    static void Blend(Span<byte> pixels, int index, byte b, byte g, byte r, int alpha)
     {
         if ((uint)alpha > 255)
             alpha = alpha < 0 ? 0 : 255;

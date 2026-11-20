@@ -16,7 +16,6 @@ sealed class SnowOverlay : NativeWindow, IDisposable
         NativeMethods.WsExTopmost;
 
     int _x, _y, _w, _h;
-    FrameBuffer? _buffer;
     IntPtr _screenDc;
     IntPtr _memDc;
     IntPtr _dib;
@@ -36,9 +35,12 @@ sealed class SnowOverlay : NativeWindow, IDisposable
                     && scene.Height == _h
                     && scene.OriginX == _x
                     && scene.OriginY == _y
-                    && _buffer != null
                     && _bits != IntPtr.Zero;
         if (same)
+            return;
+
+        long pixels = (long)scene.Width * scene.Height;
+        if (pixels <= 0 || pixels > 16_000_000)
             return;
 
         _x = scene.OriginX;
@@ -65,7 +67,6 @@ sealed class SnowOverlay : NativeWindow, IDisposable
             NativeMethods.SetWindowPos(Handle, NativeMethods.HwndTopmost, _x, _y, _w, _h, NativeMethods.SwpNoActivate);
         }
 
-        _buffer = new FrameBuffer(_w, _h);
         RecreateDib();
     }
 
@@ -95,12 +96,19 @@ sealed class SnowOverlay : NativeWindow, IDisposable
 
     public void Render(SnowSimulation simulation, float opacity)
     {
-        if (_buffer == null || Handle == IntPtr.Zero || _bits == IntPtr.Zero || _memDc == IntPtr.Zero)
+        if (Handle == IntPtr.Zero || _bits == IntPtr.Zero || _memDc == IntPtr.Zero)
             return;
 
-        _buffer.Clear();
-        SnowRasterizer.Render(_buffer, simulation, opacity);
-        Marshal.Copy(_buffer.Pixels, 0, _bits, _buffer.Pixels.Length);
+        long bytes = (long)_w * _h * 4;
+        if (bytes <= 0 || bytes > int.MaxValue)
+            return;
+
+        unsafe
+        {
+            var pixels = new Span<byte>((void*)_bits, (int)bytes);
+            pixels.Clear();
+            SnowRasterizer.Render(pixels, _w, _h, simulation, opacity);
+        }
 
         var destination = new NativeMethods.Point { X = _x, Y = _y };
         var size = new NativeMethods.Size { Cx = _w, Cy = _h };
@@ -115,11 +123,7 @@ sealed class SnowOverlay : NativeWindow, IDisposable
         NativeMethods.UpdateLayeredWindow(Handle, IntPtr.Zero, ref destination, ref size, _memDc, ref source, 0, ref blend, NativeMethods.UlwAlpha);
     }
 
-    public void ReleaseBuffer()
-    {
-        _buffer = null;
-        DestroyDib();
-    }
+    public void ReleaseBuffer() => DestroyDib();
 
     public void Dispose()
     {

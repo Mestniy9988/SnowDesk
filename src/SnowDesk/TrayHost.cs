@@ -166,6 +166,14 @@ sealed class TrayHost : IDisposable
         }
 
         IntPtr handle = bitmap.GetHicon();
-        return Icon.FromHandle(handle);
+        try
+        {
+            using Icon temporary = Icon.FromHandle(handle);
+            return (Icon)temporary.Clone();
+        }
+        finally
+        {
+            NativeMethods.DestroyIcon(handle);
+        }
     }
 }

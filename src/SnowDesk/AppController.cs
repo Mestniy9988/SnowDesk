@@ -12,7 +12,7 @@ sealed class AppController : ApplicationContext
     readonly SnowOverlay _overlay = new();
     readonly AudioEngine _audio = new();
     readonly SnowSimulation _sim = new();
-    readonly OpacityFader _fader = new();
+    readonly SnowDirector _director = new();
     readonly System.Windows.Forms.Timer _frame = new() { Interval = 33 };
     readonly System.Windows.Forms.Timer _poll = new() { Interval = 1000 };
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 70 };
@@ -27,9 +27,11 @@ sealed class AppController : ApplicationContext
     bool _batterySaver;
     bool _exit;
     string? _announcedAudioError;
+    readonly bool _showSettingsOnStart;
 
-    public AppController()
+    public AppController(bool showSettingsOnStart = false)
     {
+        _showSettingsOnStart = showSettingsOnStart;
         _settings = _store.Load();
         try
         {
@@ -74,9 +76,19 @@ sealed class AppController : ApplicationContext
             SystemEvents.SessionSwitch += OnSession;
             SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
             SystemEvents.PowerModeChanged += OnPower;
-            _monitor.Start();
+            try
+            {
+                _monitor.Start();
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+            {
+                Debug.WriteLine(ex);
+            }
+
             _poll.Start();
             Recheck();
+            if (_showSettingsOnStart)
+                OpenSettings();
         };
         boot.Start();
         Publish();
@@ -116,11 +128,10 @@ sealed class AppController : ApplicationContext
         _clock.Restart();
         if (dt <= 0f)
             dt = 0.016f;
-        else if (dt > 0.1f)
-            dt = 0.1f;
 
-        _fader.Update(dt);
-        if (_fader.Opacity <= 0.001f && !_fader.Animating)
+        PushDirector();
+        _director.Tick(dt);
+        if (!_director.Render)
         {
             EnterDormant();
             Publish();
@@ -129,12 +140,15 @@ sealed class AppController : ApplicationContext
 
         try
         {
+            _scene = _observation.Scene;
             _sim.Intensity = _settings.Intensity;
             _sim.TaskbarSnow = _settings.TaskbarSnow;
             _sim.PlowIntervalMinutes = _settings.PlowIntervalMinutes;
             _sim.Update(dt, _scene);
             _overlay.EnsureSize(_scene);
-            _overlay.Render(_sim, _fader.Opacity);
+            if (!_overlay.IsShown)
+                _overlay.ShowOverlay();
+            _overlay.Render(_sim, _director.Opacity);
         }
         catch (Exception ex)
         {
@@ -145,69 +159,59 @@ sealed class AppController : ApplicationContext
         Publish();
     }
 
-    bool WantSnow() =>
-        _settings.Enabled
-        && !_locked
-        && !_suspended
-        && !(_batterySaver && _settings.PauseOnBatterySaver)
-        && _observation.Free;
+    void PushDirector()
+    {
+        _director.Enabled = _settings.Enabled;
+        _director.DesktopFree = _observation.Free;
+        _director.FullscreenBusy = _observation.FullscreenBusy;
+        _director.Locked = _locked;
+        _director.Suspended = _suspended;
+        _director.BatterySaver = _batterySaver;
+        _director.PauseOnBatterySaver = _settings.PauseOnBatterySaver;
+        _director.Volume = _settings.Volume;
+        _director.Muted = _settings.Muted;
+    }
 
     void ApplyDesired()
     {
-        if (WantSnow())
+        if (_exit)
+            return;
+
+        PushDirector();
+        _director.Tick(0f);
+        _active = _director.Render;
+        if (_director.Render)
         {
-            BeginFadeIn();
+            _scene = _observation.Scene;
+            try
+            {
+                _overlay.EnsureSize(_scene);
+                if (!_overlay.IsShown)
+                {
+                    _overlay.ShowOverlay();
+                    _form?.RaiseAbove();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex);
+            }
+
+            if (!_frame.Enabled)
+            {
+                _clock.Restart();
+                _frame.Start();
+            }
+
+            SyncAudio();
             return;
         }
 
-        if (_observation.FullscreenBusy && (_active || _overlay.IsShown || _fader.Opacity > 0f))
-        {
-            EnterDormant();
-            return;
-        }
-
-        if (_active || _fader.Opacity > 0.001f || _fader.Animating)
-            BeginFadeOut();
-    }
-
-    void BeginFadeIn()
-    {
-        _scene = _observation.Scene;
-        bool opening = !_overlay.IsShown || !_active || _fader.Target < 0.5f;
-        _overlay.EnsureSize(_scene);
-        if (opening)
-        {
-            _overlay.ShowOverlay();
-            _form?.RaiseAbove();
-        }
-
-        bool starting = !_frame.Enabled;
-        _active = true;
-        if (starting)
-        {
-            _clock.Restart();
-            _frame.Start();
-        }
-
-        if (_fader.Opacity < 0.999f || _fader.Target < 0.999f)
-            _fader.FadeTo(1f, 1.8f);
-        SyncAudio();
-    }
-
-    void BeginFadeOut()
-    {
-        _fader.FadeTo(0f, 1.75f);
-        if (!_frame.Enabled)
-        {
-            _active = true;
-            _clock.Restart();
-            _frame.Start();
-        }
+        EnterDormant();
     }
 
     void EnterDormant()
     {
-        _fader.Snap(0f);
         _frame.Stop();
         _audio.Stop();
         _overlay.HideOverlay();
@@ -217,19 +221,20 @@ sealed class AppController : ApplicationContext
 
     void SyncAudio()
     {
-        bool fadingIn = _fader.Animating && _fader.Target > 0.5f;
-        bool audible = _active && !_settings.Muted && _settings.Volume > 0 && (_fader.Opacity > 0.01f || fadingIn);
-        if (!audible)
+        if (!_director.AudioRunning)
         {
             _audio.Stop();
             return;
         }
 
-        _audio.Play(_settings.MusicPath, _settings.Volume / 100f * Math.Max(_fader.Opacity, fadingIn ? 0.02f : 0f));
+        _audio.Play(_settings.MusicPath, _director.AudioLevel);
         if (_audio.LastError != null && _audio.LastError != _announcedAudioError)
         {
             _announcedAudioError = _audio.LastError;
-            _tray.Balloon("SnowDesk", "Файл музыки не открылся. Играет встроенный ветер.");
+            string notice = string.IsNullOrWhiteSpace(_settings.MusicPath)
+                ? "Не удалось открыть звуковое устройство. Снег идёт без музыки."
+                : "Файл музыки не открылся. Играет встроенный ветер.";
+            _tray.Balloon("SnowDesk", notice);
         }
     }
 
@@ -261,11 +266,11 @@ sealed class AppController : ApplicationContext
             return _observation.FullscreenBusy ? "пауза: полный экран «" + who + "»" : "пауза: «" + who + "»";
         }
 
-        if (_fader.Animating && _fader.Target <= 0f)
+        if (_director.Animating && _director.Target <= 0f)
             return "снег затихает";
-        if (_active && _fader.Opacity < 0.98f)
+        if (_director.Render && _director.Opacity < 0.98f)
             return "снег начинается";
-        if (!_active)
+        if (!_director.Render)
             return "ожидание свободного стола";
 
         foreach (DriftBand band in _sim.Bands)
@@ -376,7 +381,8 @@ sealed class AppController : ApplicationContext
         }
 
         _sim.CallPlow();
-        if (!WantSnow())
+        PushDirector();
+        if (!_director.WantSnow)
             _tray.Balloon("SnowDesk", "КАМАЗ выедет, когда рабочий стол снова освободится.");
     }
 

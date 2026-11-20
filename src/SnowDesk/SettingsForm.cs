@@ -25,6 +25,7 @@ sealed class SettingsForm : Form
 
         Text = "SnowDesk — настройки";
         FormBorderStyle = FormBorderStyle.FixedDialog;
+        AutoScaleMode = AutoScaleMode.Dpi;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;

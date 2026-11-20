@@ -20,10 +20,13 @@ sealed class AudioEngine : IDisposable
         lock (_gate)
         {
             level = Math.Clamp(level, 0f, 1f);
-            string key = string.IsNullOrWhiteSpace(path) ? "" : path;
-            if (_rejected != null && _rejected != key)
+            MusicResolution choice = MusicResolver.Resolve(path);
+            string key = choice.UseBuiltin ? "" : choice.Path ?? "";
+            if (choice.Error != null)
+                LastError = choice.Error;
+            if (_rejected != null && _rejected != (path ?? ""))
                 _rejected = null;
-            if (_rejected == key)
+            if (_rejected != null && _rejected == path)
                 key = "";
             if (_output != null && _key == key)
             {
@@ -41,7 +44,8 @@ sealed class AudioEngine : IDisposable
                 if (_gain != null)
                     _gain.Volume = level;
                 _output?.Play();
-                LastError = null;
+                if (choice.Error == null)
+                    LastError = null;
                 if (key.Length > 0)
                     _rejected = null;
             }
@@ -85,15 +89,27 @@ sealed class AudioEngine : IDisposable
 
     void LoadLocked(string key)
     {
-        WaveStream stream = Open(key);
-        var loop = new LoopStream(stream);
-        var gain = new GainProvider(loop.ToSampleProvider());
-        var output = new WaveOutEvent { DesiredLatency = 180 };
-        output.Init(gain);
-        _source = stream;
-        _gain = gain;
-        _output = output;
-        _key = key;
+        WaveStream? stream = null;
+        WaveOutEvent? output = null;
+        try
+        {
+            stream = Open(key);
+            var loop = new LoopStream(stream);
+            var gain = new GainProvider(loop.ToSampleProvider());
+            output = new WaveOutEvent { DesiredLatency = 180 };
+            output.Init(gain);
+            _source = stream;
+            _gain = gain;
+            _output = output;
+            _key = key;
+            stream = null;
+            output = null;
+        }
+        finally
+        {
+            output?.Dispose();
+            stream?.Dispose();
+        }
     }
 
     WaveStream Open(string key)
@@ -160,13 +176,6 @@ sealed class AudioEngine : IDisposable
             }
 
             return total;
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-                _source.Dispose();
-            base.Dispose(disposing);
         }
     }
 

@@ -16,6 +16,8 @@
     <Company>SnowDesk</Company>
     <Description>Снег и тихая музыка на свободном рабочем столе Windows.</Description>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SnowDesk.Core\SnowDesk.Core.csproj" />
