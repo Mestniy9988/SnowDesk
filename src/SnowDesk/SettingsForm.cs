@@ -16,6 +16,8 @@ sealed class SettingsForm : Form
     readonly CheckBox _autostart;
     readonly CheckBox _battery;
     readonly Label _status;
+    readonly TextBox _message;
+    readonly CheckBox _showMessage;
     bool _binding;
 
     public SettingsForm(AppSettings settings, Action changed, Action callPlow, Action chooseMusic, Action resetMusic)
@@ -56,6 +58,15 @@ sealed class SettingsForm : Form
         _plow = new NumericUpDown { Minimum = 1, Maximum = 120, Width = 70 };
         _autostart = new CheckBox { Text = "Автозапуск с Windows", AutoSize = true };
         _battery = new CheckBox { Text = "Пауза при полноэкранных приложениях", AutoSize = true };
+        _message = new TextBox
+        {
+            Multiline = true,
+            MaxLength = SpeechBubble.MaxLength,
+            Height = 72,
+            ScrollBars = ScrollBars.Vertical,
+            BorderStyle = BorderStyle.FixedSingle,
+        };
+        _showMessage = new CheckBox { Text = "Показывать сообщение", AutoSize = true };
 
         _intensity.Scroll += (_, _) =>
         {
@@ -76,6 +87,8 @@ sealed class SettingsForm : Form
         _plow.ValueChanged += (_, _) => Change(() => _settings.PlowIntervalMinutes = (int)_plow.Value);
         _autostart.CheckedChanged += (_, _) => Change(() => _settings.StartWithWindows = _autostart.Checked);
         _battery.CheckedChanged += (_, _) => Change(() => _settings.PauseOnFullscreen = _battery.Checked);
+        _message.TextChanged += (_, _) => Change(() => _settings.PlowMessage = _message.Text);
+        _showMessage.CheckedChanged += (_, _) => Change(() => _settings.ShowPlowMessage = _showMessage.Checked);
 
         var presets = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Dock = DockStyle.Top };
         foreach ((string name, int level) in Presets.Intensity)
@@ -146,6 +159,17 @@ sealed class SettingsForm : Form
         Add(Section("Панель задач"), 24);
         Add(_taskbar);
         Add(plowRow);
+        Add(new Label { Text = "Сообщение КАМАЗа", AutoSize = true });
+        Add(_message, 72);
+        var messageRow = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, WrapContents = false };
+        messageRow.Controls.Add(_showMessage);
+        messageRow.Controls.Add(GhostButton("Сбросить", () =>
+        {
+            _message.Text = SpeechBubble.DefaultText;
+            _settings.PlowMessage = SpeechBubble.DefaultText;
+            _changed();
+        }));
+        Add(messageRow);
         Add(Hint("Сугроб копится, пока стол свободен. КАМАЗ выезжает по таймеру или когда сугроб почти полный — на метели это около минуты."));
         Add(Section("Система"), 24);
         Add(_autostart);
@@ -169,10 +193,12 @@ sealed class SettingsForm : Form
         _plow.Value = Math.Clamp(_settings.PlowIntervalMinutes, 1, 120);
         _autostart.Checked = _settings.StartWithWindows;
         _battery.Checked = _settings.PauseOnFullscreen;
+        _showMessage.Checked = _settings.ShowPlowMessage;
+        _message.Text = _settings.PlowMessage;
         ShowIntensity();
         _volumeValue.Text = _settings.Volume.ToString();
         _music.Text = string.IsNullOrWhiteSpace(_settings.MusicPath)
-            ? "Сейчас играют тихие бубенцы и колокольчики."
+            ? "Сейчас играют встроенные колокольчики."
             : "Файл: " + _settings.MusicPath;
         _binding = false;
     }

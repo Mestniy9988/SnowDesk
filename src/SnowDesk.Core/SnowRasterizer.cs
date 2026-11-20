@@ -253,100 +253,54 @@ public static class SnowRasterizer
             DrawGlow(surface, lampX, lampY, 10, fade, 60, 210, 255);
         else
             DrawGlow(surface, lampX, lampY, 4, fade / 2, 40, 120, 160);
-
-        DrawSpeechBubble(surface, band, g, drawX + beaconX, drawY + beaconY, fade);
     }
 
-    static void DrawSpeechBubble(Surface surface, DriftBand band, TaskbarBand bar, int anchorX, int anchorY, int fade)
+    public static bool TryTruckAnchor(DriftBand band, out int anchorX, out int anchorY, out bool bubbleAbove)
     {
-        if (!SpeechBubble.Ready)
-            return;
+        anchorX = 0;
+        anchorY = 0;
+        bubbleAbove = true;
+        TaskbarBand g = band.Geometry;
+        if (!band.Plowing)
+            return false;
 
-        bool above = bar.Edge != TaskbarEdge.Top;
-        SpeechBubble.Placement place = SpeechBubble.Place(
-            anchorX,
-            anchorY,
-            surface.Width,
-            surface.Height,
-            above,
-            band.Travel,
-            bar.Length);
-        if (place.Opacity < 0.04f)
-            return;
-
-        int localFade = (int)(fade * place.Opacity);
-        int x = place.X;
-        int y = place.Y;
-        int w = SpeechBubble.BoxWidth;
-        int h = SpeechBubble.BoxHeight;
-        FillRound(surface, x + 2, y + 3, w, h, 16, localFade / 5, 40, 48, 60);
-        FillRound(surface, x, y, w, h, 16, localFade, 252, 250, 255);
-        if (place.TailDown)
-            FillTail(surface, place.TailX, y + h - 1, 1, localFade);
-        else
-            FillTail(surface, place.TailX, y, -1, localFade);
-
-        BlitSprite(
-            surface,
-            SpeechBubble.TextPixels,
-            SpeechBubble.TextWidth,
-            SpeechBubble.TextHeight,
-            x + SpeechBubble.PadX,
-            y + SpeechBubble.PadY,
-            localFade,
-            SpriteTransform.None);
-    }
-
-    static void FillTail(Surface surface, int tipX, int edgeY, int direction, int fade)
-    {
-        int length = 14;
-        for (int i = 0; i < length; i++)
+        SpriteTransform transform = g.Edge switch
         {
-            int half = 10 - i * 10 / length;
-            int y = edgeY + direction * i;
-            for (int x = tipX - half; x <= tipX + half; x++)
-            {
-                if ((uint)x >= (uint)surface.Width || (uint)y >= (uint)surface.Height)
-                    continue;
-                Blend(surface.Pixels, (y * surface.Width + x) * 4, 252, 250, 255, fade);
-            }
-        }
-    }
-
-    static void FillRound(Surface surface, int x, int y, int w, int h, int radius, int fade, byte b, byte g, byte r)
-    {
-        if (fade <= 0 || w <= 0 || h <= 0)
-            return;
-        radius = Math.Min(radius, Math.Min(w, h) / 2);
-        int r2 = radius * radius;
-        for (int yy = 0; yy < h; yy++)
+            TaskbarEdge.Top => SpriteTransform.FlipVertical,
+            TaskbarEdge.Left => SpriteTransform.RotateClockwise,
+            TaskbarEdge.Right => SpriteTransform.RotateCounterClockwise,
+            _ => SpriteTransform.None,
+        };
+        (int bladeX, int bladeY) = Map(KamazSprite.BladeX, KamazSprite.BladeY, transform);
+        (int wheelX, int wheelY) = Map(KamazSprite.WheelX, KamazSprite.WheelY, transform);
+        (int beaconX, int beaconY) = Map(KamazSprite.BeaconX, KamazSprite.BeaconY, transform);
+        int travel = (int)band.Travel;
+        int drawX;
+        int drawY;
+        switch (g.Edge)
         {
-            int py = y + yy;
-            if ((uint)py >= (uint)surface.Height)
-                continue;
-            for (int xx = 0; xx < w; xx++)
-            {
-                int px = x + xx;
-                if ((uint)px >= (uint)surface.Width)
-                    continue;
-                if (!InsideRound(xx, yy, w, h, radius, r2))
-                    continue;
-                Blend(surface.Pixels, (py * surface.Width + px) * 4, b, g, r, fade);
-            }
+            case TaskbarEdge.Bottom:
+                drawX = g.X + travel - bladeX;
+                drawY = (g.Y - 1) - wheelY;
+                break;
+            case TaskbarEdge.Top:
+                drawX = g.X + travel - bladeX;
+                drawY = (g.Y + g.Height) - wheelY;
+                break;
+            case TaskbarEdge.Left:
+                drawX = (g.X + g.Width) - wheelX;
+                drawY = g.Y + travel - bladeY;
+                break;
+            default:
+                drawX = (g.X - 1) - wheelX;
+                drawY = g.Y + travel - bladeY;
+                break;
         }
-    }
 
-    static bool InsideRound(int x, int y, int w, int h, int radius, int r2)
-    {
-        if (x >= radius && x < w - radius)
-            return true;
-        if (y >= radius && y < h - radius)
-            return true;
-        int cx = x < radius ? radius : w - radius - 1;
-        int cy = y < radius ? radius : h - radius - 1;
-        int dx = x - cx;
-        int dy = y - cy;
-        return dx * dx + dy * dy <= r2;
+        anchorX = drawX + beaconX;
+        anchorY = drawY + beaconY;
+        bubbleAbove = g.Edge != TaskbarEdge.Top;
+        return true;
     }
 
     static (int x, int y) Map(int sx, int sy, SpriteTransform transform)

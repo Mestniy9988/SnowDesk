@@ -24,6 +24,8 @@ sealed class SnowOverlay : NativeWindow, IDisposable
     bool _shown;
 
     public bool IsShown => _shown;
+    readonly BubblePainter _bubbles = new();
+
     public bool LastPresentOk { get; private set; }
     public int LastPresentError { get; private set; }
     public int LastOpaquePixels { get; private set; }
@@ -104,7 +106,7 @@ sealed class SnowOverlay : NativeWindow, IDisposable
         _shown = false;
     }
 
-    public void Render(SnowSimulation simulation, float opacity)
+    public void Render(SnowSimulation simulation, float opacity, string? plowMessage, bool showPlowMessage)
     {
         if (Handle == IntPtr.Zero || _bits == IntPtr.Zero || _memDc == IntPtr.Zero)
         {
@@ -126,6 +128,7 @@ sealed class SnowOverlay : NativeWindow, IDisposable
             var pixels = new Span<byte>((void*)_bits, (int)bytes);
             pixels.Clear();
             SnowRasterizer.Render(pixels, _w, _h, simulation, opacity);
+            _bubbles.Draw(pixels, _w, _h, simulation, opacity, plowMessage, showPlowMessage);
             int opaque = 0;
             for (int i = 3; i < pixels.Length; i += 16)
             {

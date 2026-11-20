@@ -165,7 +165,7 @@ sealed class AppController : ApplicationContext
                 _overlay.RaiseTopmost();
             }
 
-            _overlay.Render(_sim, _director.Opacity);
+            _overlay.Render(_sim, _director.Opacity, _settings.PlowMessage, _settings.ShowPlowMessage);
             if (!_loggedPresent || !_overlay.LastPresentOk)
             {
                 _loggedPresent = true;

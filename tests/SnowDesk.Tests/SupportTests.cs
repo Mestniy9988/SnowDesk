@@ -115,18 +115,20 @@ public class SpeechBubbleTests
     [Fact]
     public void Line_is_exact_and_stays_on_screen()
     {
-        Assert.Equal("Скоро Новый Год, я свои Дедлайны как видишь закрываю, а ты?", SpeechBubble.Text);
-        Assert.True(SpeechBubble.Ready);
-        Assert.True(SpeechBubble.TextWidth > 200);
+        Assert.Equal("Скоро Новый Год, я свои Дедлайны как видишь закрываю, а ты?", SpeechBubble.DefaultText);
+        Assert.Equal(SpeechBubble.DefaultText, SpeechBubble.Normalize("  "));
+        Assert.Equal(200, SpeechBubble.Normalize(new string('я', 240)).Length);
 
-        SpeechBubble.Placement left = SpeechBubble.Place(8, 80, 1400, 800, preferAbove: true, travel: 200, length: 1200);
+        const int boxW = 720;
+        const int boxH = 48;
+        SpeechBubble.Placement left = SpeechBubble.Place(8, 80, 1400, 800, boxW, boxH, preferAbove: true, travel: 200, length: 1200);
         Assert.Equal(4, left.X);
         Assert.True(left.Opacity > 0.2f);
-        SpeechBubble.Placement right = SpeechBubble.Place(1390, 80, 1400, 800, preferAbove: true, travel: 200, length: 1200);
+        SpeechBubble.Placement right = SpeechBubble.Place(1390, 80, 1400, 800, boxW, boxH, preferAbove: true, travel: 200, length: 1200);
         Assert.True(right.X >= 4);
-        Assert.True(right.X + SpeechBubble.BoxWidth <= 1396);
+        Assert.True(right.X + boxW <= 1396);
 
-        SpeechBubble.Placement hidden = SpeechBubble.Place(10, 40, 800, 200, preferAbove: true, travel: -30, length: 800);
+        SpeechBubble.Placement hidden = SpeechBubble.Place(10, 40, 800, 200, boxW, boxH, preferAbove: true, travel: -30, length: 800);
         Assert.True(hidden.Opacity < 0.15f);
     }
 }

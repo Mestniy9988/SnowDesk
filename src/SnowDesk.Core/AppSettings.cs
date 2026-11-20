@@ -10,6 +10,8 @@ public sealed class AppSettings
     public int Volume { get; set; } = 25;
     public bool Muted { get; set; }
     public string? MusicPath { get; set; }
+    public string PlowMessage { get; set; } = SpeechBubble.DefaultText;
+    public bool ShowPlowMessage { get; set; } = true;
     public bool TaskbarSnow { get; set; } = true;
     public int PlowIntervalMinutes { get; set; } = 12;
     public bool StartWithWindows { get; set; }
@@ -23,6 +25,7 @@ public sealed class AppSettings
         PlowIntervalMinutes = Math.Clamp(PlowIntervalMinutes, 1, 120);
         if (string.IsNullOrWhiteSpace(MusicPath))
             MusicPath = null;
+        PlowMessage = SpeechBubble.Normalize(PlowMessage);
     }
 
     public static AppSettings CreateDefault()

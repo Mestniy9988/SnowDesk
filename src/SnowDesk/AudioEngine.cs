@@ -94,8 +94,8 @@ sealed class AudioEngine : IDisposable
         try
         {
             stream = Open(key);
-            var loop = new LoopStream(stream);
-            var gain = new GainProvider(loop.ToSampleProvider());
+            var loop = new CrossfadeLoop(stream);
+            var gain = new GainProvider(loop);
             output = new WaveOutEvent { DesiredLatency = 180 };
             output.Init(gain);
             _source = stream;
@@ -144,38 +144,100 @@ sealed class AudioEngine : IDisposable
         _key = "";
     }
 
-    sealed class LoopStream : WaveStream
+    /// <summary>
+    /// Loops a file and mixes about 60 ms of the ending into the beginning
+    /// so an MP3 (including 320 kbps stereo 44.1 kHz) does not click at the join.
+    /// </summary>
+    sealed class CrossfadeLoop : ISampleProvider
     {
         readonly WaveStream _source;
+        readonly ISampleProvider _samples;
+        readonly float[] _head;
+        readonly int _channels;
+        readonly int _fadeSamples;
+        bool _primed;
 
-        public LoopStream(WaveStream source) => _source = source;
-
-        public override WaveFormat WaveFormat => _source.WaveFormat;
-        public override long Length => _source.Length;
-        public override long Position
+        public CrossfadeLoop(WaveStream source)
         {
-            get => _source.Position;
-            set => _source.Position = value;
+            _source = source;
+            _samples = source.ToSampleProvider();
+            _channels = Math.Max(1, source.WaveFormat.Channels);
+            int frames = (int)(source.WaveFormat.SampleRate * 0.06);
+            long totalFrames = source.Length / Math.Max(1, source.WaveFormat.BlockAlign);
+            if (totalFrames < frames * 3)
+                frames = (int)Math.Max(0, totalFrames / 4);
+            _fadeSamples = frames * _channels;
+            _head = new float[Math.Max(1, _fadeSamples)];
         }
 
-        public override int Read(byte[] buffer, int offset, int count)
+        public WaveFormat WaveFormat => _samples.WaveFormat;
+
+        public int Read(float[] buffer, int offset, int count)
         {
-            int total = 0;
-            while (total < count)
+            if (!_primed)
+                Prime();
+
+            int written = 0;
+            int guard = 0;
+            while (written < count && guard++ < 8)
             {
-                int read = _source.Read(buffer, offset + total, count - total);
-                if (read > 0)
+                int block = Math.Max(1, _source.WaveFormat.BlockAlign);
+                long framesLeft = Math.Max(0, (_source.Length - _source.Position) / block);
+                int samplesLeft = (int)Math.Min(int.MaxValue, framesLeft * _channels);
+                if (samplesLeft <= 0)
                 {
-                    total += read;
+                    _source.Position = 0;
                     continue;
                 }
 
-                if (_source.Position == 0 || _source.Length == 0)
-                    break;
-                _source.Position = 0;
+                if (_fadeSamples > 0 && samplesLeft <= _fadeSamples)
+                {
+                    int take = Math.Min(count - written, samplesLeft);
+                    var tail = new float[take];
+                    int got = _samples.Read(tail, 0, take);
+                    if (got <= 0)
+                    {
+                        _source.Position = 0;
+                        continue;
+                    }
+
+                    int fadePos = _fadeSamples - samplesLeft;
+                    for (int i = 0; i < got; i++)
+                    {
+                        float weight = Math.Clamp((fadePos + i + 1) / (float)_fadeSamples, 0f, 1f);
+                        int headIndex = Math.Clamp(fadePos + i, 0, _head.Length - 1);
+                        buffer[offset + written + i] = tail[i] * (1f - weight) + _head[headIndex] * weight;
+                    }
+
+                    written += got;
+                    if (_source.Position >= _source.Length - block)
+                        _source.Position = (long)(_fadeSamples / _channels) * block;
+                    continue;
+                }
+
+                int before = Math.Min(count - written, samplesLeft - _fadeSamples);
+                int read = _samples.Read(buffer, offset + written, before);
+                if (read <= 0)
+                {
+                    _source.Position = 0;
+                    continue;
+                }
+
+                written += read;
             }
 
-            return total;
+            return written;
+        }
+
+        void Prime()
+        {
+            _primed = true;
+            if (_fadeSamples <= 0)
+                return;
+            int got = _samples.Read(_head, 0, _head.Length);
+            if (got < _head.Length)
+                Array.Clear(_head, got, _head.Length - got);
+            _source.Position = 0;
         }
     }
 
