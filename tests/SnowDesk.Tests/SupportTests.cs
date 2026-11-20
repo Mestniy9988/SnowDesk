@@ -97,8 +97,37 @@ public class SynthTests
         }
 
         double rms = Math.Sqrt(sum / samples);
-        Assert.InRange(rms, 400, 6000);
-        Assert.InRange(peak, 1000, 20000);
+        Assert.InRange(rms, 40, 2500);
+        Assert.InRange(peak, 800, 16000);
+        int quiet = 0;
+        for (int i = 0; i < samples; i++)
+        {
+            if (Math.Abs(BitConverter.ToInt16(wav, 44 + i * 2)) < 250)
+                quiet++;
+        }
+
+        Assert.True(quiet > samples * 0.45, $"quiet fraction {quiet / (double)samples:0.00}");
+    }
+}
+
+public class SpeechBubbleTests
+{
+    [Fact]
+    public void Line_is_exact_and_stays_on_screen()
+    {
+        Assert.Equal("Скоро Новый Год, я свои Дедлайны как видишь закрываю, а ты?", SpeechBubble.Text);
+        Assert.True(SpeechBubble.Ready);
+        Assert.True(SpeechBubble.TextWidth > 200);
+
+        SpeechBubble.Placement left = SpeechBubble.Place(8, 80, 1400, 800, preferAbove: true, travel: 200, length: 1200);
+        Assert.Equal(4, left.X);
+        Assert.True(left.Opacity > 0.2f);
+        SpeechBubble.Placement right = SpeechBubble.Place(1390, 80, 1400, 800, preferAbove: true, travel: 200, length: 1200);
+        Assert.True(right.X >= 4);
+        Assert.True(right.X + SpeechBubble.BoxWidth <= 1396);
+
+        SpeechBubble.Placement hidden = SpeechBubble.Place(10, 40, 800, 200, preferAbove: true, travel: -30, length: 800);
+        Assert.True(hidden.Opacity < 0.15f);
     }
 }
 
@@ -128,7 +157,7 @@ public class RasterizerTests
         sim.Update(1f / 30f, scene);
         sim.StampSnow(18f);
         sim.CallPlow();
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < 140; i++)
             sim.Update(1f / 30f, scene);
 
         var buffer = new FrameBuffer(scene.Width, scene.Height);

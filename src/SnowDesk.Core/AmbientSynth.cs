@@ -1,51 +1,106 @@
 namespace SnowDesk;
 
 /// <summary>
-/// Short seamless loop: a low pad plus heavily filtered wind.
-/// Generated in-process, so the app ships without a third-party recording.
+/// Long procedural loop: sparse sleigh bells and quiet celesta-like chimes
+/// on a major pentatonic scale, with long gaps and a barely-there warm bed.
 /// </summary>
 public static class AmbientSynth
 {
     public const int SampleRate = 22050;
-    public const int DurationSeconds = 12;
+    public const int DurationSeconds = 36;
+
+    static readonly float[] Scale =
+    {
+        523.25f, 587.33f, 659.25f, 783.99f, 880f, 1046.5f, 1174.66f, 1318.51f, 1567.98f,
+    };
 
     public static byte[] BuildWav()
     {
         int count = SampleRate * DurationSeconds;
-        var samples = new short[count];
-        float low = 0f;
-        float lower = 0f;
-        for (int i = 0; i < count; i++)
+        var mix = new float[count];
+        float time = 1.4f;
+        int phrase = 0;
+        while (time < DurationSeconds - 3.2f)
         {
-            float time = i / (float)SampleRate;
-            float pad =
-                0.22f * MathF.Sin(2f * MathF.PI * 55f * time) +
-                0.16f * MathF.Sin(2f * MathF.PI * 110f * time) +
-                0.07f * MathF.Sin(2f * MathF.PI * 164f * time + 0.4f) +
-                0.055f * MathF.Sin(2f * MathF.PI * 220f * time + 1.2f) +
-                0.030f * MathF.Sin(2f * MathF.PI * 329f * time + 0.6f) +
-                0.012f * MathF.Sin(2f * MathF.PI * 660f * time);
-            float swell = 0.86f + 0.14f * MathF.Sin(2f * MathF.PI * time / DurationSeconds);
+            int notes = 2 + (HashInt(phrase * 13 + 1) % 4);
+            float cursor = time;
+            for (int note = 0; note < notes; note++)
+            {
+                int pick = HashInt(phrase * 29 + note * 7);
+                float freq = Scale[pick % Scale.Length];
+                float decay = 0.45f + (HashInt(pick + 3) % 80) / 100f;
+                float amp = 0.11f + (HashInt(pick + 9) % 50) / 1000f;
+                AddChime(mix, cursor, freq, decay, amp);
+                if (HashInt(pick + 11) % 3 == 0)
+                    AddSleigh(mix, cursor, 0.07f + (HashInt(pick) % 30) / 1000f);
+                cursor += 0.28f + (HashInt(phrase * 3 + note) % 40) / 100f;
+            }
 
-            float white = Hash(i);
-            low += (white - low) * 0.012f;
-            lower += (low - lower) * 0.0035f;
-            float wind = (low - lower) * (0.65f + 0.35f * MathF.Sin(2f * MathF.PI * time / 6f));
-
-            float mixed = MathF.Tanh((pad * swell * 0.62f + wind * 0.55f) * 1.15f);
-            samples[i] = (short)Math.Clamp(mixed * 7000f, short.MinValue, short.MaxValue);
+            phrase++;
+            time += 3.4f + (HashInt(phrase * 19) % 280) / 100f;
         }
 
-        int fade = SampleRate / 2;
-        var copy = (short[])samples.Clone();
+        for (int i = 0; i < count; i++)
+        {
+            float t = i / (float)SampleRate;
+            mix[i] += 0.012f * MathF.Sin(2f * MathF.PI * 196f * t);
+            mix[i] += 0.008f * MathF.Sin(2f * MathF.PI * 294f * t);
+            mix[i] = MathF.Tanh(mix[i] * 1.4f);
+        }
+
+        int fade = SampleRate / 3;
+        var copy = (float[])mix.Clone();
         for (int i = 0; i < fade; i++)
         {
             float weight = i / (float)(fade - 1);
             int end = count - fade + i;
-            samples[end] = (short)(copy[end] * (1f - weight) + copy[i] * weight);
+            mix[end] = copy[end] * (1f - weight) + copy[i] * weight;
         }
 
+        var samples = new short[count];
+        for (int i = 0; i < count; i++)
+            samples[i] = (short)Math.Clamp(mix[i] * 7000f, short.MinValue, short.MaxValue);
         return WriteWav(samples, SampleRate);
+    }
+
+    static void AddChime(float[] mix, float start, float freq, float decay, float amp)
+    {
+        int origin = (int)(start * SampleRate);
+        int length = (int)(decay * 4.2f * SampleRate);
+        for (int i = 0; i < length && origin + i < mix.Length; i++)
+        {
+            float time = i / (float)SampleRate;
+            float env = MathF.Exp(-time / decay) * MathF.Min(1f, time / 0.006f);
+            float tone =
+                0.72f * MathF.Sin(2f * MathF.PI * freq * time) +
+                0.18f * MathF.Sin(2f * MathF.PI * freq * 2.003f * time) +
+                0.07f * MathF.Sin(2f * MathF.PI * freq * 3.01f * time);
+            mix[origin + i] += tone * env * amp;
+        }
+    }
+
+    static void AddSleigh(float[] mix, float start, float amp)
+    {
+        int origin = (int)(start * SampleRate);
+        int length = (int)(0.22f * SampleRate);
+        for (int i = 0; i < length && origin + i < mix.Length; i++)
+        {
+            float time = i / (float)SampleRate;
+            float env = MathF.Exp(-time / 0.055f) * MathF.Min(1f, time / 0.002f);
+            float metal =
+                0.45f * MathF.Sin(2f * MathF.PI * 2480f * time) +
+                0.28f * MathF.Sin(2f * MathF.PI * 3320f * time) +
+                0.22f * Hash(origin + i);
+            mix[origin + i] += metal * env * amp;
+        }
+    }
+
+    static int HashInt(int index)
+    {
+        uint x = (uint)index * 747796405u + 2891336453u;
+        x = ((x >> 16) ^ x) * 0x7feb352du;
+        x = ((x >> 15) ^ x) * 0x846ca68bu;
+        return (int)(((x >> 16) ^ x) & 0x7fffffff);
     }
 
     public static float Hash(int index)

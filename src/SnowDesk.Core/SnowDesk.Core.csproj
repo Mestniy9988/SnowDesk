@@ -9,4 +9,7 @@
     <Version>1.0.0</Version>
     <Description>Snowfall, taskbar drift and KAMAZ plow simulation for SnowDesk.</Description>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="SpeechBubble.bin" />
+  </ItemGroup>
 </Project>

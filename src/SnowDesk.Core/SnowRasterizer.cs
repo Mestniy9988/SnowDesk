@@ -250,9 +250,103 @@ public static class SnowRasterizer
         int lampX = drawX + beaconX;
         int lampY = drawY + beaconY;
         if (lampOn)
-            DrawGlow(surface, lampX, lampY, 5, fade, 60, 210, 255);
+            DrawGlow(surface, lampX, lampY, 10, fade, 60, 210, 255);
         else
-            DrawGlow(surface, lampX, lampY, 2, fade / 2, 40, 120, 160);
+            DrawGlow(surface, lampX, lampY, 4, fade / 2, 40, 120, 160);
+
+        DrawSpeechBubble(surface, band, g, drawX + beaconX, drawY + beaconY, fade);
+    }
+
+    static void DrawSpeechBubble(Surface surface, DriftBand band, TaskbarBand bar, int anchorX, int anchorY, int fade)
+    {
+        if (!SpeechBubble.Ready)
+            return;
+
+        bool above = bar.Edge != TaskbarEdge.Top;
+        SpeechBubble.Placement place = SpeechBubble.Place(
+            anchorX,
+            anchorY,
+            surface.Width,
+            surface.Height,
+            above,
+            band.Travel,
+            bar.Length);
+        if (place.Opacity < 0.04f)
+            return;
+
+        int localFade = (int)(fade * place.Opacity);
+        int x = place.X;
+        int y = place.Y;
+        int w = SpeechBubble.BoxWidth;
+        int h = SpeechBubble.BoxHeight;
+        FillRound(surface, x + 2, y + 3, w, h, 16, localFade / 5, 40, 48, 60);
+        FillRound(surface, x, y, w, h, 16, localFade, 252, 250, 255);
+        if (place.TailDown)
+            FillTail(surface, place.TailX, y + h - 1, 1, localFade);
+        else
+            FillTail(surface, place.TailX, y, -1, localFade);
+
+        BlitSprite(
+            surface,
+            SpeechBubble.TextPixels,
+            SpeechBubble.TextWidth,
+            SpeechBubble.TextHeight,
+            x + SpeechBubble.PadX,
+            y + SpeechBubble.PadY,
+            localFade,
+            SpriteTransform.None);
+    }
+
+    static void FillTail(Surface surface, int tipX, int edgeY, int direction, int fade)
+    {
+        int length = 14;
+        for (int i = 0; i < length; i++)
+        {
+            int half = 10 - i * 10 / length;
+            int y = edgeY + direction * i;
+            for (int x = tipX - half; x <= tipX + half; x++)
+            {
+                if ((uint)x >= (uint)surface.Width || (uint)y >= (uint)surface.Height)
+                    continue;
+                Blend(surface.Pixels, (y * surface.Width + x) * 4, 252, 250, 255, fade);
+            }
+        }
+    }
+
+    static void FillRound(Surface surface, int x, int y, int w, int h, int radius, int fade, byte b, byte g, byte r)
+    {
+        if (fade <= 0 || w <= 0 || h <= 0)
+            return;
+        radius = Math.Min(radius, Math.Min(w, h) / 2);
+        int r2 = radius * radius;
+        for (int yy = 0; yy < h; yy++)
+        {
+            int py = y + yy;
+            if ((uint)py >= (uint)surface.Height)
+                continue;
+            for (int xx = 0; xx < w; xx++)
+            {
+                int px = x + xx;
+                if ((uint)px >= (uint)surface.Width)
+                    continue;
+                if (!InsideRound(xx, yy, w, h, radius, r2))
+                    continue;
+                Blend(surface.Pixels, (py * surface.Width + px) * 4, b, g, r, fade);
+            }
+        }
+    }
+
+    static bool InsideRound(int x, int y, int w, int h, int radius, int r2)
+    {
+        if (x >= radius && x < w - radius)
+            return true;
+        if (y >= radius && y < h - radius)
+            return true;
+        int cx = x < radius ? radius : w - radius - 1;
+        int cy = y < radius ? radius : h - radius - 1;
+        int dx = x - cx;
+        int dy = y - cy;
+        return dx * dx + dy * dy <= r2;
     }
 
     static (int x, int y) Map(int sx, int sy, SpriteTransform transform)

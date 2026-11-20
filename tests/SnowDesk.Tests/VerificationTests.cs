@@ -242,7 +242,7 @@ public class SettingsCorruptionTests
     {
         string path = NewPath();
         AppSettings missing = new SettingsStore(path).Load();
-        Assert.Equal(35, missing.Volume);
+        Assert.Equal(25, missing.Volume);
 
         File.WriteAllText(path, """{"intensity":1,"volume":9,"mystery":true}""");
         AppSettings loaded = new SettingsStore(path).Load();
@@ -304,7 +304,7 @@ public class ExtremeAndPlowTests
         storm.Update(1f / 30f, scene);
         IntensityProfile high = IntensityProfile.FromLevel(100);
         Assert.Equal(high.TargetFlakes, storm.Flakes.Count);
-        Assert.Equal(460, storm.Flakes.Count);
+        Assert.InRange(storm.Flakes.Count, 880, 960);
         Assert.Contains(storm.Flakes, flake => flake.Speed > 150f);
         Assert.Contains(storm.Flakes, flake => flake.Size > 8f);
     }

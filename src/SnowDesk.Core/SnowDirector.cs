@@ -13,7 +13,7 @@ public sealed class SnowDirector
     public bool Enabled { get; set; } = true;
     public bool FullscreenBusy { get; set; }
     public bool PauseOnFullscreen { get; set; }
-    public int Volume { get; set; } = 35;
+    public int Volume { get; set; } = 25;
     public bool Muted { get; set; }
 
     public float Opacity => _fader.Opacity;

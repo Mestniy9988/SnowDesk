@@ -7,7 +7,7 @@ public sealed class AppSettings
 {
     public bool Enabled { get; set; } = true;
     public int Intensity { get; set; } = 40;
-    public int Volume { get; set; } = 35;
+    public int Volume { get; set; } = 25;
     public bool Muted { get; set; }
     public string? MusicPath { get; set; }
     public bool TaskbarSnow { get; set; } = true;
@@ -47,7 +47,7 @@ public static class Presets
     public static readonly (string Name, int Volume)[] Volume =
     {
         ("Тихо", 15),
-        ("Средне", 35),
+        ("Средне", 25),
         ("Громко", 70),
     };
 

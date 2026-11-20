@@ -90,6 +90,8 @@ sealed class AppController : ApplicationContext
             Recheck();
             AppLog.WriteStartup(_scene);
             AppLog.Write($"enabled={_settings.Enabled} intensity={_settings.Intensity} taskbarSnow={_settings.TaskbarSnow} pauseFullscreen={_settings.PauseOnFullscreen}");
+            if (DesktopMonitor.PreviewMode)
+                _sim.CallPlow();
             if (_showSettingsOnStart)
                 OpenSettings();
             if (!_startupBalloon)
@@ -253,7 +255,7 @@ sealed class AppController : ApplicationContext
             AppLog.Write("audio error: " + _audio.LastError);
             string notice = string.IsNullOrWhiteSpace(_settings.MusicPath)
                 ? "Не удалось открыть звуковое устройство. Снег идёт без музыки."
-                : "Файл музыки не открылся. Играет встроенный ветер.";
+                : "Файл музыки не открылся. Играют встроенные колокольчики.";
             _tray.Balloon("SnowDesk", notice);
         }
         else if (_announcedAudioError != null && _audio.LastError == null)

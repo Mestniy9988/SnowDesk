@@ -172,7 +172,7 @@ sealed class SettingsForm : Form
         ShowIntensity();
         _volumeValue.Text = _settings.Volume.ToString();
         _music.Text = string.IsNullOrWhiteSpace(_settings.MusicPath)
-            ? "Сейчас играет встроенный ветер и тихий пэд."
+            ? "Сейчас играют тихие бубенцы и колокольчики."
             : "Файл: " + _settings.MusicPath;
         _binding = false;
     }

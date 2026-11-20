@@ -6,20 +6,45 @@ namespace SnowDesk;
 /// </summary>
 public static class KamazSprite
 {
-    public const int Width = 88;
-    public const int Height = 48;
-    public const int BladeX = 86;
-    public const int BladeY = 30;
-    public const int WheelX = 58;
-    public const int WheelY = 44;
-    public const int BeaconX = 52;
-    public const int BeaconY = 7;
+    public const int Width = 176;
+    public const int Height = 96;
+    public const int BladeX = 172;
+    public const int BladeY = 60;
+    public const int WheelX = 116;
+    public const int WheelY = 88;
+    public const int BeaconX = 104;
+    public const int BeaconY = 14;
 
-    public static byte[] Pixels { get; } = Draw();
+    public static byte[] Pixels { get; } = Scale2(DrawSmall(), 88, 48);
 
-    static byte[] Draw()
+    static byte[] Scale2(byte[] source, int width, int height)
     {
-        var pix = new Pix(Width, Height);
+        var scaled = new byte[width * 2 * height * 2 * 4];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int from = (y * width + x) * 4;
+                for (int dy = 0; dy < 2; dy++)
+                {
+                    for (int dx = 0; dx < 2; dx++)
+                    {
+                        int to = ((y * 2 + dy) * width * 2 + (x * 2 + dx)) * 4;
+                        scaled[to] = source[from];
+                        scaled[to + 1] = source[from + 1];
+                        scaled[to + 2] = source[from + 2];
+                        scaled[to + 3] = source[from + 3];
+                    }
+                }
+            }
+        }
+
+        return scaled;
+    }
+
+    static byte[] DrawSmall()
+    {
+        var pix = new Pix(88, 48);
 
         // Angled municipal blade, low in front of the bumper.
         pix.FillPolygon(
@@ -72,7 +97,7 @@ public static class KamazSprite
 
         // Beacon housing. The lamp itself is painted by the renderer so it can blink.
         pix.Rect(48, 11, 10, 4, 54, 58, 64);
-        pix.FillCircle(BeaconX, BeaconY, 3, 120, 78, 16);
+        pix.FillCircle(52, 7, 3, 120, 78, 16);
 
         return pix.Buffer;
     }

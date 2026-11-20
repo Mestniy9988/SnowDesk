@@ -68,7 +68,7 @@ public class SimulationTests
         sim.StampSnow(20f);
         float before = sim.Bands[0].Mean;
         sim.CallPlow();
-        Run(sim, scene, 12f);
+        Run(sim, scene, 20f);
         Assert.True(sim.PlowsStarted >= 1);
         Assert.True(sim.Bands[0].Mean < before * 0.25f, $"mean {sim.Bands[0].Mean} before {before}");
         Assert.False(sim.Bands[0].Plowing);

@@ -117,7 +117,8 @@ public sealed class SnowSimulation
 {
     public const int DepositRadius = 6;
     public const float DepositSigma = 2.4f;
-    public const int MaxPuffs = 48;
+    public const int MaxPuffs = 72;
+    public const int BladeClearExtra = 20;
 
     readonly List<Flake> _flakes = new();
     readonly List<DriftBand> _bands = new();
@@ -402,11 +403,11 @@ public sealed class SnowSimulation
 
             if (band.Plowing)
             {
-                float speed = MathF.Max(80f, band.Geometry.Length / 7.2f);
+                float speed = MathF.Max(40f, band.Geometry.Length / 14.4f);
                 float previous = band.Travel;
                 band.Travel += speed * dt;
                 Sweep(band, previous, band.Travel);
-                if (band.Travel > band.Geometry.Length + 28f)
+                if (band.Travel > band.Geometry.Length + 56f)
                 {
                     band.Plowing = false;
                     band.ElapsedSincePlow = 0f;
@@ -432,7 +433,7 @@ public sealed class SnowSimulation
         if (band.Plowing)
             return;
         band.Plowing = true;
-        band.Travel = -18f;
+        band.Travel = -36f;
         band.Puffs.Clear();
         PlowsStarted++;
     }
@@ -440,7 +441,7 @@ public sealed class SnowSimulation
     void Sweep(DriftBand band, float from, float to)
     {
         float[] heights = band.Heights;
-        int start = Math.Clamp((int)MathF.Floor(from), 0, heights.Length);
+        int start = Math.Clamp((int)MathF.Floor(from) - BladeClearExtra, 0, heights.Length);
         int end = Math.Clamp((int)MathF.Ceiling(to), 0, heights.Length);
         for (int i = start; i < end; i++)
         {
@@ -500,7 +501,7 @@ public sealed class SnowSimulation
             Vy = vy,
             Life = life,
             MaxLife = life,
-            Size = 2f + _random.NextSingle() * 3f,
+            Size = 4f + _random.NextSingle() * 6f,
         });
     }
 
