@@ -13,7 +13,8 @@ public sealed class AppSettings
     public bool TaskbarSnow { get; set; } = true;
     public int PlowIntervalMinutes { get; set; } = 12;
     public bool StartWithWindows { get; set; }
-    public bool PauseOnBatterySaver { get; set; } = true;
+    public bool PauseOnBatterySaver { get; set; }
+    public bool PauseOnFullscreen { get; set; }
 
     public void Clamp()
     {

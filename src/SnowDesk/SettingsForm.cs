@@ -55,7 +55,7 @@ sealed class SettingsForm : Form
         _taskbar = new CheckBox { Text = "Копить сугроб на панели задач", AutoSize = true };
         _plow = new NumericUpDown { Minimum = 1, Maximum = 120, Width = 70 };
         _autostart = new CheckBox { Text = "Автозапуск с Windows", AutoSize = true };
-        _battery = new CheckBox { Text = "Пауза в режиме энергосбережения", AutoSize = true };
+        _battery = new CheckBox { Text = "Пауза при полноэкранных приложениях", AutoSize = true };
 
         _intensity.Scroll += (_, _) =>
         {
@@ -75,7 +75,7 @@ sealed class SettingsForm : Form
         _taskbar.CheckedChanged += (_, _) => Change(() => _settings.TaskbarSnow = _taskbar.Checked);
         _plow.ValueChanged += (_, _) => Change(() => _settings.PlowIntervalMinutes = (int)_plow.Value);
         _autostart.CheckedChanged += (_, _) => Change(() => _settings.StartWithWindows = _autostart.Checked);
-        _battery.CheckedChanged += (_, _) => Change(() => _settings.PauseOnBatterySaver = _battery.Checked);
+        _battery.CheckedChanged += (_, _) => Change(() => _settings.PauseOnFullscreen = _battery.Checked);
 
         var presets = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Dock = DockStyle.Top };
         foreach ((string name, int level) in Presets.Intensity)
@@ -168,7 +168,7 @@ sealed class SettingsForm : Form
         _taskbar.Checked = _settings.TaskbarSnow;
         _plow.Value = Math.Clamp(_settings.PlowIntervalMinutes, 1, 120);
         _autostart.Checked = _settings.StartWithWindows;
-        _battery.Checked = _settings.PauseOnBatterySaver;
+        _battery.Checked = _settings.PauseOnFullscreen;
         ShowIntensity();
         _volumeValue.Text = _settings.Volume.ToString();
         _music.Text = string.IsNullOrWhiteSpace(_settings.MusicPath)

@@ -1,3 +1,5 @@
+# Example only. Not installed as a GitHub workflow.
+# Copy to .github/workflows/build.yml if the token may push workflow files.
 name: Build SnowDesk
 
 on:

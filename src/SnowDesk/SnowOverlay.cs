@@ -24,6 +24,9 @@ sealed class SnowOverlay : NativeWindow, IDisposable
     bool _shown;
 
     public bool IsShown => _shown;
+    public bool LastPresentOk { get; private set; }
+    public int LastPresentError { get; private set; }
+    public int LastOpaquePixels { get; private set; }
 
     public void EnsureSize(Scene scene)
     {
@@ -75,6 +78,14 @@ sealed class SnowOverlay : NativeWindow, IDisposable
         if (Handle == IntPtr.Zero)
             return;
         NativeMethods.ShowWindow(Handle, NativeMethods.SwShowNoActivate);
+        RaiseTopmost();
+        _shown = true;
+    }
+
+    public void RaiseTopmost()
+    {
+        if (Handle == IntPtr.Zero)
+            return;
         NativeMethods.SetWindowPos(
             Handle,
             NativeMethods.HwndTopmost,
@@ -83,7 +94,6 @@ sealed class SnowOverlay : NativeWindow, IDisposable
             _w,
             _h,
             NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
-        _shown = true;
     }
 
     public void HideOverlay()
@@ -97,17 +107,33 @@ sealed class SnowOverlay : NativeWindow, IDisposable
     public void Render(SnowSimulation simulation, float opacity)
     {
         if (Handle == IntPtr.Zero || _bits == IntPtr.Zero || _memDc == IntPtr.Zero)
+        {
+            LastPresentOk = false;
+            LastPresentError = -1;
             return;
+        }
 
         long bytes = (long)_w * _h * 4;
         if (bytes <= 0 || bytes > int.MaxValue)
+        {
+            LastPresentOk = false;
+            LastPresentError = -2;
             return;
+        }
 
         unsafe
         {
             var pixels = new Span<byte>((void*)_bits, (int)bytes);
             pixels.Clear();
             SnowRasterizer.Render(pixels, _w, _h, simulation, opacity);
+            int opaque = 0;
+            for (int i = 3; i < pixels.Length; i += 16)
+            {
+                if (pixels[i] != 0)
+                    opaque++;
+            }
+
+            LastOpaquePixels = opaque;
         }
 
         var destination = new NativeMethods.Point { X = _x, Y = _y };
@@ -120,7 +146,9 @@ sealed class SnowOverlay : NativeWindow, IDisposable
             SourceConstantAlpha = 255,
             AlphaFormat = 1,
         };
-        NativeMethods.UpdateLayeredWindow(Handle, IntPtr.Zero, ref destination, ref size, _memDc, ref source, 0, ref blend, NativeMethods.UlwAlpha);
+        LastPresentOk = NativeMethods.UpdateLayeredWindow(
+            Handle, IntPtr.Zero, ref destination, ref size, _memDc, ref source, 0, ref blend, NativeMethods.UlwAlpha);
+        LastPresentError = LastPresentOk ? 0 : NativeMethods.GetLastError();
     }
 
     public void ReleaseBuffer() => DestroyDib();

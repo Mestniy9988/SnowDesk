@@ -1,21 +1,18 @@
 namespace SnowDesk;
 
 /// <summary>
-/// Decides when snow is drawing and when audio is actually running.
-/// A fullscreen window snaps both off. Any other busy desktop fades them out
-/// together, and a quick return reverses the fade instead of restarting it.
+/// Snow and audio follow the manual on/off switch. They fade together in about 1.5 seconds.
+/// A fullscreen window pauses them only when that option is enabled.
 /// </summary>
 public sealed class SnowDirector
 {
+    public const float FadeSeconds = 1.5f;
+
     readonly OpacityFader _fader = new();
 
     public bool Enabled { get; set; } = true;
-    public bool DesktopFree { get; set; }
     public bool FullscreenBusy { get; set; }
-    public bool Locked { get; set; }
-    public bool Suspended { get; set; }
-    public bool BatterySaver { get; set; }
-    public bool PauseOnBatterySaver { get; set; } = true;
+    public bool PauseOnFullscreen { get; set; }
     public int Volume { get; set; } = 35;
     public bool Muted { get; set; }
 
@@ -26,12 +23,7 @@ public sealed class SnowDirector
     public bool AudioRunning { get; private set; }
     public float AudioLevel { get; private set; }
 
-    public bool WantSnow =>
-        Enabled
-        && DesktopFree
-        && !Locked
-        && !Suspended
-        && !(BatterySaver && PauseOnBatterySaver);
+    public bool WantSnow => Enabled && !(PauseOnFullscreen && FullscreenBusy);
 
     public void Tick(float dt)
     {
@@ -42,17 +34,12 @@ public sealed class SnowDirector
 
         if (WantSnow)
         {
-            FadeToward(1f, 1.8f);
+            FadeToward(1f, FadeSeconds);
             Render = true;
-        }
-        else if (FullscreenBusy && (Render || _fader.Opacity > 0f || _fader.Animating))
-        {
-            _fader.Snap(0f);
-            Render = false;
         }
         else if (Render || _fader.Opacity > 0.001f || _fader.Animating)
         {
-            FadeToward(0f, 1.75f);
+            FadeToward(0f, FadeSeconds);
             Render = true;
         }
 

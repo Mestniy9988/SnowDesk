@@ -15,6 +15,7 @@ sealed class AppController : ApplicationContext
     readonly SnowDirector _director = new();
     readonly System.Windows.Forms.Timer _frame = new() { Interval = 33 };
     readonly System.Windows.Forms.Timer _poll = new() { Interval = 1000 };
+    readonly HotkeyWindow _hotkey = new();
     readonly System.Windows.Forms.Timer _debounce = new() { Interval = 70 };
     readonly Stopwatch _clock = new();
 
@@ -22,10 +23,10 @@ sealed class AppController : ApplicationContext
     Scene _scene = new();
     SettingsForm? _form;
     bool _active;
-    bool _locked;
-    bool _suspended;
-    bool _batterySaver;
     bool _exit;
+    bool _loggedPresent;
+    bool _startupBalloon;
+    float _topmostWait;
     string? _announcedAudioError;
     readonly bool _showSettingsOnStart;
 
@@ -58,6 +59,7 @@ sealed class AppController : ApplicationContext
         _tray.CallPlow += CallPlow;
         _tray.OpenSettings += OpenSettings;
         _tray.ExitRequested += ExitApplication;
+        _hotkey.Pressed += () => Toggle(s => s.Enabled = !s.Enabled);
 
         _monitor.Activity += OnActivity;
         _debounce.Tick += (_, _) =>
@@ -73,9 +75,7 @@ sealed class AppController : ApplicationContext
         {
             boot.Stop();
             boot.Dispose();
-            SystemEvents.SessionSwitch += OnSession;
             SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
-            SystemEvents.PowerModeChanged += OnPower;
             try
             {
                 _monitor.Start();
@@ -85,10 +85,18 @@ sealed class AppController : ApplicationContext
                 Debug.WriteLine(ex);
             }
 
+            _hotkey.Start();
             _poll.Start();
             Recheck();
+            AppLog.WriteStartup(_scene);
+            AppLog.Write($"enabled={_settings.Enabled} intensity={_settings.Intensity} taskbarSnow={_settings.TaskbarSnow} pauseFullscreen={_settings.PauseOnFullscreen}");
             if (_showSettingsOnStart)
                 OpenSettings();
+            if (!_startupBalloon)
+            {
+                _startupBalloon = true;
+                _tray.Balloon("SnowDesk", _settings.Enabled ? "Снег включён" : "Снег выключен");
+            }
         };
         boot.Start();
         Publish();
@@ -106,10 +114,10 @@ sealed class AppController : ApplicationContext
             return;
         try
         {
-            _batterySaver = NativeMethods.IsBatterySaverOn();
             _observation = _monitor.Query();
+            _scene = _observation.Scene;
             if (_active)
-                _scene = _observation.Scene;
+                _overlay.RaiseTopmost();
             ApplyDesired();
             Publish();
         }
@@ -148,10 +156,25 @@ sealed class AppController : ApplicationContext
             _overlay.EnsureSize(_scene);
             if (!_overlay.IsShown)
                 _overlay.ShowOverlay();
+            _topmostWait += dt;
+            if (_topmostWait >= 1f)
+            {
+                _topmostWait = 0f;
+                _overlay.RaiseTopmost();
+            }
+
             _overlay.Render(_sim, _director.Opacity);
+            if (!_loggedPresent || !_overlay.LastPresentOk)
+            {
+                _loggedPresent = true;
+                AppLog.Write(
+                    $"layered update ok={_overlay.LastPresentOk} err={_overlay.LastPresentError} " +
+                    $"opaqueSamples={_overlay.LastOpaquePixels} shown={_overlay.IsShown} opacity={_director.Opacity:0.00}");
+            }
         }
         catch (Exception ex)
         {
+            AppLog.Write("frame error: " + ex.Message);
             Debug.WriteLine(ex);
         }
 
@@ -162,12 +185,8 @@ sealed class AppController : ApplicationContext
     void PushDirector()
     {
         _director.Enabled = _settings.Enabled;
-        _director.DesktopFree = _observation.Free;
         _director.FullscreenBusy = _observation.FullscreenBusy;
-        _director.Locked = _locked;
-        _director.Suspended = _suspended;
-        _director.BatterySaver = _batterySaver;
-        _director.PauseOnBatterySaver = _settings.PauseOnBatterySaver;
+        _director.PauseOnFullscreen = _settings.PauseOnFullscreen;
         _director.Volume = _settings.Volume;
         _director.Muted = _settings.Muted;
     }
@@ -231,10 +250,16 @@ sealed class AppController : ApplicationContext
         if (_audio.LastError != null && _audio.LastError != _announcedAudioError)
         {
             _announcedAudioError = _audio.LastError;
+            AppLog.Write("audio error: " + _audio.LastError);
             string notice = string.IsNullOrWhiteSpace(_settings.MusicPath)
                 ? "Не удалось открыть звуковое устройство. Снег идёт без музыки."
                 : "Файл музыки не открылся. Играет встроенный ветер.";
             _tray.Balloon("SnowDesk", notice);
+        }
+        else if (_announcedAudioError != null && _audio.LastError == null)
+        {
+            _announcedAudioError = null;
+            AppLog.Write("audio started");
         }
     }
 
@@ -248,30 +273,16 @@ sealed class AppController : ApplicationContext
 
     string StatusText()
     {
-        if (!_settings.Enabled)
-            return "снег выключен";
-        if (_locked)
-            return "пауза: сеанс заблокирован";
-        if (_suspended)
-            return "пауза: система спит";
-        if (_batterySaver && _settings.PauseOnBatterySaver)
-            return "пауза: энергосбережение";
-        if (!_observation.Free)
-        {
-            string who = string.IsNullOrWhiteSpace(_observation.BlockerTitle)
-                ? (_observation.BlockerClass ?? "окно")
-                : _observation.BlockerTitle;
-            if (who.Length > 40)
-                who = who[..40] + "…";
-            return _observation.FullscreenBusy ? "пауза: полный экран «" + who + "»" : "пауза: «" + who + "»";
-        }
-
+        if (_settings.PauseOnFullscreen && _observation.FullscreenBusy && _settings.Enabled)
+            return "пауза: полный экран";
+        if (!_settings.Enabled && !_director.Render)
+            return "выключено";
         if (_director.Animating && _director.Target <= 0f)
-            return "снег затихает";
+            return "выключается";
         if (_director.Render && _director.Opacity < 0.98f)
-            return "снег начинается";
+            return "включается";
         if (!_director.Render)
-            return "ожидание свободного стола";
+            return "выключено";
 
         foreach (DriftBand band in _sim.Bands)
         {
@@ -286,7 +297,15 @@ sealed class AppController : ApplicationContext
 
     void Assign(Action<AppSettings> change)
     {
+        bool wasEnabled = _settings.Enabled;
         change(_settings);
+        if (wasEnabled != _settings.Enabled)
+        {
+            AppLog.Write(_settings.Enabled ? "toggled ON" : "toggled OFF");
+            _tray.Balloon("SnowDesk", _settings.Enabled ? "Снег включён" : "Снег выключается");
+            _loggedPresent = false;
+        }
+
         Commit(refreshForm: true);
     }
 
@@ -374,6 +393,12 @@ sealed class AppController : ApplicationContext
 
     void CallPlow()
     {
+        if (!_settings.Enabled)
+        {
+            _tray.Balloon("SnowDesk", "Сначала включите снег — левый щелчок по иконке или Ctrl+Alt+S.");
+            return;
+        }
+
         if (!_settings.TaskbarSnow)
         {
             _tray.Balloon("SnowDesk", "Включите «Снег на панели задач», чтобы вызвать КАМАЗ.");
@@ -381,33 +406,8 @@ sealed class AppController : ApplicationContext
         }
 
         _sim.CallPlow();
-        PushDirector();
-        if (!_director.WantSnow)
-            _tray.Balloon("SnowDesk", "КАМАЗ выедет, когда рабочий стол снова освободится.");
-    }
-
-    void OnSession(object? sender, SessionSwitchEventArgs e)
-    {
-        if (e.Reason == SessionSwitchReason.SessionLock)
-            _locked = true;
-        else if (e.Reason == SessionSwitchReason.SessionUnlock)
-            _locked = false;
-        else
-            return;
-        ApplyDesired();
-        Publish();
-    }
-
-    void OnPower(object? sender, PowerModeChangedEventArgs e)
-    {
-        if (e.Mode == PowerModes.Suspend)
-            _suspended = true;
-        else if (e.Mode == PowerModes.Resume)
-            _suspended = false;
-        else
-            return;
-        ApplyDesired();
-        Publish();
+        _tray.Balloon("SnowDesk", "КАМАЗ выехал");
+        AppLog.Write("plow requested");
     }
 
     void OnDisplayChanged(object? sender, EventArgs e)
@@ -430,12 +430,11 @@ sealed class AppController : ApplicationContext
         if (_exit)
             return;
         _exit = true;
-        SystemEvents.SessionSwitch -= OnSession;
         SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
-        SystemEvents.PowerModeChanged -= OnPower;
         _frame.Stop();
         _poll.Stop();
         _debounce.Stop();
+        _hotkey.Dispose();
         _audio.Dispose();
         _overlay.Dispose();
         _monitor.Dispose();

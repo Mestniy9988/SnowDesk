@@ -73,7 +73,11 @@ sealed class TrayHost : IDisposable
             Text = "SnowDesk",
             ContextMenuStrip = menu,
         };
-        _icon.DoubleClick += (_, _) => OpenSettings?.Invoke();
+        _icon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+                EnableToggled?.Invoke();
+        };
     }
 
     public event Action? EnableToggled;
@@ -91,6 +95,7 @@ sealed class TrayHost : IDisposable
 
     public void Sync(AppSettings settings, string status)
     {
+        _enable.Text = (settings.Enabled ? "Выключить" : "Включить") + "\t" + HotkeyWindow.Chord;
         _enable.Checked = settings.Enabled;
         _mute.Checked = settings.Muted;
         _taskbar.Checked = settings.TaskbarSnow;

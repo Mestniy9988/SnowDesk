@@ -7,9 +7,7 @@ public class DirectorTests
         return new SnowDirector
         {
             Enabled = true,
-            DesktopFree = true,
             Volume = volume,
-            PauseOnBatterySaver = true,
         };
     }
 
@@ -31,12 +29,23 @@ public class DirectorTests
         Assert.True(director.AudioRunning);
         Assert.Equal(0.40f, director.AudioLevel, 2);
 
-        director.DesktopFree = false;
+        director.Enabled = false;
         Settle(director, 2f);
         Assert.False(director.Render);
         Assert.False(director.AudioRunning);
         Assert.Equal(0f, director.AudioLevel);
         Assert.Equal(0f, director.Opacity);
+    }
+
+    [Fact]
+    public void Open_windows_do_not_stop_snow()
+    {
+        SnowDirector director = Running();
+        Settle(director, 2f);
+        director.FullscreenBusy = true;
+        director.Tick(0.5f);
+        Assert.True(director.Render);
+        Assert.Equal(1f, director.Opacity, 2);
     }
 
     [Fact]
@@ -48,25 +57,25 @@ public class DirectorTests
         Assert.InRange(rising, 0.15f, 0.35f);
         Assert.True(director.AudioRunning);
 
-        director.DesktopFree = false;
+        director.Enabled = false;
         Settle(director, 0.2f);
         float falling = director.Opacity;
         Assert.True(falling < rising - 0.05f);
         Assert.True(director.Render);
 
-        director.DesktopFree = true;
+        director.Enabled = true;
         Settle(director, 0.2f);
         Assert.True(director.Opacity > falling);
         Assert.True(director.Render);
         Assert.True(director.AudioRunning);
         Assert.InRange(director.Opacity, 0.01f, 0.99f);
 
-        director.DesktopFree = false;
+        director.Enabled = false;
         Settle(director, 2f);
         Assert.False(director.Render);
         Assert.False(director.AudioRunning);
 
-        director.DesktopFree = true;
+        director.Enabled = true;
         director.Tick(1f / 30f);
         Assert.True(director.Render);
         Assert.True(director.AudioRunning);
@@ -74,20 +83,20 @@ public class DirectorTests
     }
 
     [Fact]
-    public void Fullscreen_cuts_snow_and_audio_immediately()
+    public void Fullscreen_pauses_only_when_the_option_is_on()
     {
         SnowDirector director = Running();
         Settle(director, 2f);
-        director.DesktopFree = false;
         director.FullscreenBusy = true;
-        director.Tick(0f);
+        director.PauseOnFullscreen = true;
+        Settle(director, 2f);
         Assert.False(director.Render);
         Assert.False(director.AudioRunning);
         Assert.Equal(0f, director.Opacity);
     }
 
     [Fact]
-    public void Lock_battery_saver_and_mute_keep_the_device_stopped()
+    public void Mute_stops_the_device_while_snow_stays()
     {
         SnowDirector director = Running();
         Settle(director, 2f);
@@ -100,26 +109,15 @@ public class DirectorTests
         director.Muted = false;
         director.Volume = 0;
         director.Tick(0f);
+        Assert.True(director.Render);
         Assert.False(director.AudioRunning);
-
-        director.Volume = 40;
-        director.Locked = true;
-        Settle(director, 2f);
-        Assert.False(director.Render);
-        Assert.False(director.AudioRunning);
-
-        director.Locked = false;
-        director.DesktopFree = true;
-        director.BatterySaver = true;
-        director.Tick(0.2f);
-        Assert.False(director.Render);
     }
 
     [Fact]
     public void Audio_level_tracks_opacity()
     {
         SnowDirector director = Running(volume: 80);
-        Settle(director, 0.9f);
+        Settle(director, 0.75f);
         Assert.Equal(0.5f, director.Opacity, 1);
         Assert.Equal(0.40f, director.AudioLevel, 1);
     }
